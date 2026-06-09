@@ -1,0 +1,906 @@
+import SwiftUI
+
+struct PrompterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var script: Script
+    let onSave: () -> Void
+
+    @StateObject private var engine = ScrollEngine()
+    @StateObject private var speechFollower = SpeechFollower()
+    @State private var cameraPermission: CameraPermissionState = .checking
+    @State private var showSettingsPanel = false
+    @State private var speechLineIndex: Int?
+    @State private var dragMode: DragMode?
+    @State private var dragStartSpeed: Double = 0
+    @State private var dragStartOffset: CGFloat = 0
+    @State private var promptLines: [PromptLine] = []
+    @State private var lastFormattedWidth: CGFloat = 0
+    @State private var lastFormattedFontSize: Double = 0
+    @State private var lastFormattedContent = ""
+    @State private var latestMaximumOffset: CGFloat = 0
+    @State private var hasStartedDefaultSpeech = false
+    @State private var speechStartPending = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let targetCharacters = targetCharactersPerLine(width: proxy.size.width, fontSize: script.fontSize)
+            let visibleLines = promptLines.isEmpty ? PromptFormatter.lines(from: script.content, targetCharactersPerLine: targetCharacters) : promptLines
+            let fontSize = CGFloat(script.fontSize)
+            let baseLineHeight = promptBaseLineHeight(fontSize: fontSize)
+            let lineLayouts = promptLineLayouts(
+                for: visibleLines,
+                width: proxy.size.width,
+                fontSize: fontSize,
+                baseLineHeight: baseLineHeight
+            )
+            let contentHeight = lineLayouts.last.map { $0.y + $0.height } ?? 0
+            let averageLineHeight = averagePromptLineHeight(for: lineLayouts, fallback: baseLineHeight)
+            let topPadding = proxy.size.height * 0.40
+            let isSpeedMode = !speechStartPending && speechFollower.state == .idle
+            let bottomPadding = proxy.size.height * (showSettingsPanel ? (isSpeedMode ? 0.46 : 0.40) : 0.34)
+            let totalHeight = contentHeight + topPadding + bottomPadding
+            let maxOffset = max(0, totalHeight - proxy.size.height)
+            let averageCharacters = averageCharactersPerLine(for: visibleLines)
+            let scrollingIndex = lineIndex(
+                atContentY: max(0, engine.offset - topPadding + averageLineHeight * 0.42),
+                layouts: lineLayouts
+            )
+            let currentIndex = visibleLines.isEmpty ? 0 : (speechFollower.isListening ? min(visibleLines.count - 1, max(0, speechLineIndex ?? scrollingIndex)) : scrollingIndex)
+            let shouldHighlightCurrentLine = speechFollower.isListening
+
+            ZStack {
+                CameraPreview(permissionState: $cameraPermission)
+                    .ignoresSafeArea()
+                    .overlay(.black.opacity(cameraPermission == .authorized ? script.overlayOpacity : 0.78))
+
+                if cameraPermission != .authorized {
+                    cameraStatusView
+                }
+
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    promptLayer(
+                        lineLayouts: lineLayouts,
+                        topPadding: topPadding,
+                        bottomPadding: bottomPadding,
+                        currentIndex: currentIndex,
+                        shouldHighlightCurrentLine: shouldHighlightCurrentLine,
+                        viewportHeight: proxy.size.height
+                    )
+                    .frame(height: proxy.size.height)
+                    .clipped()
+                    Spacer(minLength: 0)
+                }
+
+                interactionLayer(
+                    in: proxy.size,
+                    topReservedHeight: proxy.safeAreaInsets.top + 96,
+                    bottomReservedHeight: proxy.safeAreaInsets.bottom + (showSettingsPanel ? (isSpeedMode ? 336 : 240) : 24)
+                )
+                .zIndex(1)
+
+                if showSettingsPanel {
+                    settingsPanel(maxOffset: maxOffset)
+                        .environment(\.colorScheme, .dark)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                        .zIndex(3)
+                }
+
+                topBar
+                    .environment(\.colorScheme, .dark)
+                    .zIndex(5)
+            }
+            .background(Color.black)
+            .statusBarHidden(true)
+            .persistentSystemOverlays(.hidden)
+            .contentShape(Rectangle())
+            .onAppear {
+                refreshPromptLines(width: proxy.size.width)
+                latestMaximumOffset = maxOffset
+                engine.configure(
+                    speed: script.scrollSpeed,
+                    lineHeight: averageLineHeight,
+                    averageCharactersPerLine: averageCharacters,
+                    maximumOffset: maxOffset
+                )
+                startDefaultSpeechIfNeeded(maxOffset: maxOffset)
+            }
+            .onChange(of: script.scrollSpeed) { _, value in
+                engine.setSpeed(value)
+            }
+            .onChange(of: engine.speed) { _, value in
+                script.scrollSpeed = value
+                onSave()
+            }
+            .onChange(of: script.fontSize) { _, _ in
+                refreshPromptLines(width: proxy.size.width)
+                engine.configure(
+                    speed: script.scrollSpeed,
+                    lineHeight: averageLineHeight,
+                    averageCharactersPerLine: averageCharacters,
+                    maximumOffset: maxOffset
+                )
+                onSave()
+            }
+            .onChange(of: script.content) { _, _ in
+                refreshPromptLines(width: proxy.size.width)
+            }
+            .onChange(of: proxy.size.width) { _, width in
+                refreshPromptLines(width: width)
+            }
+            .onChange(of: promptLines) { _, lines in
+                latestMaximumOffset = maxOffset
+                engine.configure(
+                    speed: script.scrollSpeed,
+                    lineHeight: averageLineHeight,
+                    averageCharactersPerLine: averageCharactersPerLine(for: lines),
+                    maximumOffset: maxOffset
+                )
+            }
+            .onChange(of: maxOffset) { _, value in
+                latestMaximumOffset = value
+                engine.configure(
+                    speed: script.scrollSpeed,
+                    lineHeight: averageLineHeight,
+                    averageCharactersPerLine: averageCharacters,
+                    maximumOffset: value
+                )
+            }
+            .onChange(of: speechFollower.progress) { _, progress in
+                guard speechFollower.isListening else { return }
+                let lineIndex = speechLineIndex(for: progress, promptLines: visibleLines)
+                speechLineIndex = lineIndex
+                engine.follow(to: speechTargetOffset(
+                    for: lineIndex,
+                    layouts: lineLayouts,
+                    topPadding: topPadding,
+                    viewportHeight: proxy.size.height,
+                    maximumOffset: maxOffset
+                ))
+            }
+            .onChange(of: speechFollower.state) { _, state in
+                if state != .idle {
+                    speechStartPending = false
+                }
+                if state != .listening {
+                    speechLineIndex = nil
+                    engine.stopFollowing()
+                }
+            }
+            .onChange(of: script.textColorPreset) { _, _ in onSave() }
+            .onChange(of: script.overlayOpacity) { _, _ in onSave() }
+            .onDisappear {
+                speechFollower.stop()
+                engine.stopFollowing()
+            }
+        }
+    }
+
+    private func refreshPromptLines(width: CGFloat) {
+        let normalizedWidth = max(1, width.rounded(.down))
+        guard normalizedWidth != lastFormattedWidth ||
+            script.fontSize != lastFormattedFontSize ||
+            script.content != lastFormattedContent
+        else {
+            return
+        }
+
+        let targetCharacters = targetCharactersPerLine(width: width, fontSize: script.fontSize)
+        promptLines = PromptFormatter.lines(from: script.content, targetCharactersPerLine: targetCharacters)
+        lastFormattedWidth = normalizedWidth
+        lastFormattedFontSize = script.fontSize
+        lastFormattedContent = script.content
+    }
+
+    private func targetCharactersPerLine(width: CGFloat, fontSize: Double) -> Int {
+        let usableWidth = max(220, width - 44)
+        let fontSize = CGFloat(fontSize)
+        let estimatedCharacterWidth = max(8, fontSize * 0.82)
+        let estimatedCount = Int((usableWidth / estimatedCharacterWidth) * 0.88)
+        return max(4, min(30, estimatedCount))
+    }
+
+    private func promptBaseLineHeight(fontSize: CGFloat) -> CGFloat {
+        max(fontSize * 1.34, fontSize + 12)
+    }
+
+    private func promptLineSpacing(fontSize: CGFloat) -> CGFloat {
+        max(4, fontSize * 0.10)
+    }
+
+    private func promptLineLayouts(
+        for promptLines: [PromptLine],
+        width: CGFloat,
+        fontSize: CGFloat,
+        baseLineHeight: CGFloat
+    ) -> [PromptLineLayout] {
+        var currentY: CGFloat = 0
+        let usableWidth = max(1, width - 40)
+
+        return promptLines.enumerated().map { index, line in
+            let visualRows = estimatedVisualRows(for: line.text, width: usableWidth, fontSize: fontSize)
+            let rowHeight = CGFloat(visualRows) * baseLineHeight + max(8, fontSize * 0.22)
+            let layout = PromptLineLayout(index: index, line: line, y: currentY, height: rowHeight)
+            currentY += rowHeight
+            return layout
+        }
+    }
+
+    private func estimatedVisualRows(for text: String, width: CGFloat, fontSize: CGFloat) -> Int {
+        guard !text.isEmpty else { return 1 }
+
+        let estimatedCharacterWidth = max(8, fontSize * 0.84)
+        let charactersPerRow = max(1, Int(width / estimatedCharacterWidth))
+        return max(1, Int((Double(text.count) / Double(charactersPerRow)).rounded(.up)))
+    }
+
+    private func averagePromptLineHeight(for layouts: [PromptLineLayout], fallback: CGFloat) -> CGFloat {
+        guard !layouts.isEmpty else { return fallback }
+        let sum = layouts.reduce(CGFloat(0)) { $0 + $1.height }
+        return max(fallback, sum / CGFloat(layouts.count))
+    }
+
+    private func lineIndex(atContentY contentY: CGFloat, layouts: [PromptLineLayout]) -> Int {
+        guard !layouts.isEmpty else { return 0 }
+
+        if let layout = layouts.first(where: { contentY <= $0.y + $0.height }) {
+            return layout.index
+        }
+
+        return layouts.last?.index ?? 0
+    }
+
+    private func averageCharactersPerLine(for promptLines: [PromptLine]) -> CGFloat {
+        guard !promptLines.isEmpty else { return 12 }
+        let sum = promptLines.reduce(0) { $0 + $1.characterCount }
+        return CGFloat(max(6, sum / promptLines.count))
+    }
+
+    private var topBar: some View {
+        VStack {
+            HStack(alignment: .center, spacing: 10) {
+                Button {
+                    engine.pause()
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 42, height: 42)
+                        .glassCircle()
+                        .contentShape(Circle())
+                        .foregroundStyle(.primary)
+                }
+                .accessibilityLabel("关闭提词")
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 12)
+
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        showSettingsPanel.toggle()
+                    }
+                } label: {
+                    Image(systemName: showSettingsPanel ? "gearshape.fill" : "gearshape")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 42, height: 42)
+                        .glassCircle()
+                        .contentShape(Circle())
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showSettingsPanel ? "关闭设置" : "打开设置")
+            }
+            .frame(height: 42, alignment: .center)
+            .overlay {
+                modeStatusButton
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+
+            Spacer()
+        }
+    }
+
+    private var speedText: String {
+        "\(Int(engine.speed)) 字/分"
+    }
+
+    private var speedModeActive: Bool {
+        !speechStartPending && speechFollower.state == .idle
+    }
+
+    private var modeStatusButton: some View {
+        Button {
+            toggleModeFromStatusPill()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: modeStatusIcon)
+                    .font(.system(size: 12, weight: .bold))
+
+                Text(modeStatusText)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .glassCapsule()
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(modeStatusAccessibilityLabel)
+    }
+
+    private var modeStatusIcon: String {
+        if speechStartPending || speechFollower.isListening {
+            return "waveform"
+        }
+
+        if speechFollower.state != .idle {
+            return "exclamationmark.circle"
+        }
+
+        return "speedometer"
+    }
+
+    private var modeStatusText: String {
+        if speechStartPending {
+            return "正在准备语音"
+        }
+
+        if speechFollower.state != .idle {
+            return speechFollower.statusText
+        }
+
+        return speedText
+    }
+
+    private var modeStatusAccessibilityLabel: String {
+        if speechStartPending || speechFollower.state != .idle {
+            return "切换到速度控制"
+        }
+
+        return "切换到语音跟随"
+    }
+
+    private var cameraStatusView: some View {
+        VStack(spacing: 14) {
+            Image(systemName: cameraPermission == .denied ? "camera.fill.badge.ellipsis" : "camera.viewfinder")
+                .font(.system(size: 42, weight: .semibold))
+            Text(cameraStatusTitle)
+                .font(.headline)
+            Text(cameraStatusMessage)
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 280)
+        }
+        .padding(22)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .foregroundStyle(.white)
+    }
+
+    private var cameraStatusTitle: String {
+        switch cameraPermission {
+        case .checking: "正在请求摄像头"
+        case .authorized: ""
+        case .denied: "摄像头权限未开启"
+        case .unavailable: "无法使用前置摄像头"
+        }
+    }
+
+    private var cameraStatusMessage: String {
+        switch cameraPermission {
+        case .checking: "首次打开会弹出权限确认。"
+        case .authorized: ""
+        case .denied: "请到系统设置里允许乔木提词器访问摄像头。"
+        case .unavailable: "当前设备或运行环境没有可用的前置摄像头。"
+        }
+    }
+
+    private func promptLayer(
+        lineLayouts: [PromptLineLayout],
+        topPadding: CGFloat,
+        bottomPadding: CGFloat,
+        currentIndex: Int,
+        shouldHighlightCurrentLine: Bool,
+        viewportHeight: CGFloat
+    ) -> some View {
+        let visibleRange = visibleLayoutRange(
+            layouts: lineLayouts,
+            topPadding: topPadding,
+            viewportHeight: viewportHeight
+        )
+
+        return ZStack(alignment: .top) {
+            ForEach(Array(visibleRange), id: \.self) { index in
+                let layout = lineLayouts[index]
+                let line = layout.line
+                let isHighlighted = shouldHighlightCurrentLine && layout.index == currentIndex && isSpeakableLine(line.text)
+
+                Text(line.text)
+                    .font(.system(size: script.fontSize, weight: .semibold, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(promptLineSpacing(fontSize: CGFloat(script.fontSize)))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(isHighlighted ? Color.white : script.textColorPreset.color.opacity(0.62))
+                    .shadow(color: isHighlighted ? .white.opacity(0.46) : .clear, radius: 11, y: 0)
+                    .shadow(color: isHighlighted ? .black.opacity(0.36) : .clear, radius: 4, y: 1)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: layout.height)
+                    .padding(.horizontal, 20)
+                    .animation(.easeInOut(duration: 0.16), value: currentIndex)
+                    .offset(y: topPadding + layout.y - engine.offset)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func visibleLayoutRange(
+        layouts: [PromptLineLayout],
+        topPadding: CGFloat,
+        viewportHeight: CGFloat
+    ) -> Range<Int> {
+        guard !layouts.isEmpty else { return 0..<0 }
+
+        let visibleTop = engine.offset - topPadding - viewportHeight * 0.35
+        let visibleBottom = engine.offset - topPadding + viewportHeight * 1.35
+        let start = layouts.firstIndex { $0.y + $0.height >= visibleTop }.map { max(0, $0 - 2) } ?? 0
+        let end = layouts.firstIndex { $0.y > visibleBottom }.map { min(layouts.count, $0 + 2) } ?? layouts.count
+        return start..<end
+    }
+
+    private func interactionLayer(
+        in size: CGSize,
+        topReservedHeight: CGFloat,
+        bottomReservedHeight: CGFloat
+    ) -> some View {
+        VStack(spacing: 0) {
+            Color.clear
+                .frame(height: topReservedHeight)
+                .allowsHitTesting(false)
+
+            HStack(spacing: 0) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: handleCanvasTap)
+                    .gesture(sideDragGesture(.speed))
+
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: handleCanvasTap)
+                    .gesture(sideDragGesture(.manualScroll))
+
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: handleCanvasTap)
+                    .gesture(sideDragGesture(.progress))
+            }
+
+            Color.clear
+                .frame(height: bottomReservedHeight)
+                .allowsHitTesting(false)
+        }
+        .ignoresSafeArea()
+    }
+
+    private func handleCanvasTap() {
+        if showSettingsPanel {
+            withAnimation(.snappy(duration: 0.2)) {
+                showSettingsPanel = false
+            }
+            return
+        }
+
+        if speechFollower.isListening {
+            return
+        }
+
+        engine.toggle()
+    }
+
+    private func settingsPanel(maxOffset: CGFloat) -> some View {
+        VStack {
+            Spacer()
+
+            VStack(spacing: 14) {
+                if speedModeActive {
+                    speedModeSettings(maxOffset: maxOffset)
+                } else {
+                    speechModeSettings(maxOffset: maxOffset)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
+            .frame(maxWidth: 390)
+            .glassPanel(cornerRadius: 24)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func speedModeSettings(maxOffset: CGFloat) -> some View {
+        transportControls
+
+        VStack(spacing: 12) {
+            fontSizeSlider
+
+            controlSlider(
+                title: "速度",
+                value: Binding(
+                    get: { script.scrollSpeed },
+                    set: {
+                        script.scrollSpeed = $0
+                        engine.setSpeed($0)
+                    }
+                ),
+                range: 20...260,
+                label: "\(Int(script.scrollSpeed)) 字/分"
+            )
+
+            progressSlider(maxOffset: maxOffset)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private func speechModeSettings(maxOffset: CGFloat) -> some View {
+        VStack(spacing: 12) {
+            fontSizeSlider
+            progressSlider(maxOffset: maxOffset)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var transportControls: some View {
+        HStack(spacing: 10) {
+            glassIconButton(
+                systemName: "gobackward.10",
+                accessibilityLabel: "后退"
+            ) {
+                engine.setOffset(max(0, engine.offset - 240))
+            }
+
+            Button {
+                engine.toggle()
+            } label: {
+                Image(systemName: engine.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 21, weight: .bold))
+                    .frame(width: 52, height: 42)
+                    .foregroundStyle(.primary)
+                    .glassCapsule()
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(engine.isPlaying ? "暂停" : "播放")
+
+            glassIconButton(
+                systemName: "goforward.10",
+                accessibilityLabel: "前进"
+            ) {
+                engine.setOffset(engine.offset + 240)
+            }
+
+            Divider()
+                .frame(height: 28)
+                .overlay(.white.opacity(0.22))
+
+            glassIconButton(
+                systemName: "arrow.counterclockwise",
+                accessibilityLabel: "回到开头"
+            ) {
+                engine.reset()
+            }
+        }
+    }
+
+    private var fontSizeSlider: some View {
+        controlSlider(
+            title: "字号",
+            value: Binding(
+                get: { script.fontSize },
+                set: { script.fontSize = $0 }
+            ),
+            range: 12...110,
+            label: "\(Int(script.fontSize))"
+        )
+    }
+
+    private func progressSlider(maxOffset: CGFloat) -> some View {
+        controlSlider(
+            title: "进度",
+            value: Binding(
+                get: { Double(engine.offset) },
+                set: { engine.setOffset(CGFloat($0)) }
+            ),
+            range: 0...max(1, Double(maxOffset)),
+            label: "\(Int(progress(maxOffset: maxOffset) * 100))%"
+        )
+    }
+
+    private func glassIconButton(
+        systemName: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 42, height: 42)
+                .foregroundStyle(.primary)
+                .glassCircle()
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func controlSlider(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        label: String
+    ) -> some View {
+        VStack(spacing: 6) {
+            HStack {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.72))
+                Spacer()
+                Text(label)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white)
+            }
+            Slider(value: value, in: range)
+                .tint(.white.opacity(0.86))
+        }
+    }
+
+    private func progress(maxOffset: CGFloat) -> CGFloat {
+        guard maxOffset > 0 else { return 0 }
+        return min(1, max(0, engine.offset / maxOffset))
+    }
+
+    private func sideDragGesture(_ mode: DragMode) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                if speechFollower.isListening, mode != .manualScroll {
+                    return
+                }
+
+                if dragMode == nil {
+                    dragMode = mode
+                    dragStartSpeed = engine.speed
+                    dragStartOffset = engine.offset
+
+                    if mode == .manualScroll {
+                        stopSpeechFollowerForManualPositioning()
+                    } else {
+                        showSettingsPanel = true
+                    }
+                }
+
+                switch dragMode {
+                case .speed:
+                    let delta = -Double(value.translation.height) * 0.42
+                    engine.setSpeed(dragStartSpeed + delta)
+                    script.scrollSpeed = engine.speed
+                case .progress:
+                    engine.setOffset(dragStartOffset - value.translation.height * 1.35)
+                case .manualScroll:
+                    engine.setOffset(dragStartOffset - value.translation.height * 1.05)
+                case .none:
+                    break
+                }
+            }
+            .onEnded { _ in
+                dragMode = nil
+                onSave()
+            }
+    }
+
+    private func toggleModeFromStatusPill() {
+        if speechStartPending || speechFollower.state != .idle {
+            switchToSpeedControl()
+        } else {
+            startSpeechFollower(maxOffset: latestMaximumOffset)
+        }
+    }
+
+    private func switchToSpeedControl() {
+        engine.stopFollowing()
+        engine.pause()
+        speechStartPending = false
+        speechFollower.reset()
+
+        withAnimation(.snappy(duration: 0.22)) {
+            showSettingsPanel = true
+        }
+    }
+
+    private func startDefaultSpeechIfNeeded(maxOffset: CGFloat) {
+        guard !hasStartedDefaultSpeech else { return }
+        hasStartedDefaultSpeech = true
+        startSpeechFollower(maxOffset: maxOffset)
+    }
+
+    private func startSpeechFollower(maxOffset: CGFloat) {
+        guard !script.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        engine.pause()
+        engine.stopFollowing()
+        speechLineIndex = nil
+        speechStartPending = true
+
+        withAnimation(.snappy(duration: 0.2)) {
+            showSettingsPanel = false
+        }
+
+        speechFollower.start(content: script.content, initialProgress: Double(progress(maxOffset: maxOffset)))
+    }
+
+    private func stopSpeechFollowerForManualPositioning() {
+        engine.pause()
+        engine.stopFollowing()
+
+        if speechFollower.isListening {
+            speechFollower.stop()
+            speechLineIndex = nil
+        }
+    }
+
+    private func speechLineIndex(for progress: Double, promptLines: [PromptLine]) -> Int {
+        let speakableLines = promptLines.enumerated().filter { isSpeakableLine($0.element.text) }
+        guard !speakableLines.isEmpty else { return 0 }
+
+        let counts = speakableLines.map { max(1, speechCharacterCount($0.element.text)) }
+        let total = counts.reduce(0, +)
+        let rawTarget = max(1, Int((Double(total) * progress).rounded(.down)))
+        let target = progress >= 0.995 ? total : max(1, rawTarget - 2)
+        var running = 0
+
+        for (index, count) in counts.enumerated() {
+            running += count
+            if target <= running {
+                return speakableLines[index].offset
+            }
+        }
+
+        return speakableLines.last?.offset ?? 0
+    }
+
+    private func speechTargetOffset(
+        for lineIndex: Int,
+        layouts: [PromptLineLayout],
+        topPadding: CGFloat,
+        viewportHeight: CGFloat,
+        maximumOffset: CGFloat
+    ) -> CGFloat {
+        let targetTop = max(132, viewportHeight * 0.34)
+        let lineY = layouts.first(where: { $0.index == lineIndex })?.y ?? 0
+        let rawOffset = topPadding + lineY - targetTop
+        return min(maximumOffset, max(0, rawOffset))
+    }
+
+    private func speechCharacterCount(_ text: String) -> Int {
+        text.filter { $0.isLetter || $0.isNumber }.count
+    }
+
+    private func isSpeakableLine(_ text: String) -> Bool {
+        text.contains { $0.isLetter || $0.isNumber }
+    }
+}
+
+private struct PromptLineLayout: Equatable {
+    let index: Int
+    let line: PromptLine
+    let y: CGFloat
+    let height: CGFloat
+}
+
+private enum DragMode {
+    case speed
+    case progress
+    case manualScroll
+}
+
+private extension View {
+    @ViewBuilder
+    func glassCapsule() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.tint(.white.opacity(0.04)).interactive(), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(.white.opacity(0.20), lineWidth: 0.7)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+        } else {
+            background(.ultraThinMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(.white.opacity(0.18), lineWidth: 0.7)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 14, y: 7)
+        }
+    }
+
+    @ViewBuilder
+    func glassCircle() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.tint(.white.opacity(0.04)).interactive(), in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(.white.opacity(0.20), lineWidth: 0.7)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+        } else {
+            background(.ultraThinMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(.white.opacity(0.18), lineWidth: 0.7)
+                )
+                .shadow(color: .black.opacity(0.12), radius: 14, y: 7)
+        }
+    }
+
+    @ViewBuilder
+    func glassPanel(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.tint(.white.opacity(0.04)).interactive(), in: shape)
+                .overlay(
+                    shape
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.34),
+                                    .white.opacity(0.12),
+                                    .white.opacity(0.06)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.8
+                        )
+                )
+                .shadow(color: .black.opacity(0.16), radius: 24, y: 14)
+        } else {
+            background(.ultraThinMaterial, in: shape)
+                .overlay(
+                    shape
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.30),
+                                    .white.opacity(0.12),
+                                    .white.opacity(0.06)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.8
+                        )
+                )
+                .shadow(color: .black.opacity(0.16), radius: 22, y: 12)
+        }
+    }
+}
+
+#Preview {
+    PrompterView(
+        script: .constant(
+            Script(
+                title: "试用",
+                content: "大家好，这里是第一句。\n左侧滑动调速度，右侧滑动调进度。\n点击屏幕播放或暂停。"
+            )
+        ),
+        onSave: {}
+    )
+}
