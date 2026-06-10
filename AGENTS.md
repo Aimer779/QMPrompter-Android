@@ -41,6 +41,7 @@ Do NOT introduce unless explicitly requested:
 - Phase 1.5 SpeechRecognizer PoC 结果：`plans/phase-1.5-speech-poc-result.md`
 - Phase 2 实施计划：`plans/phase-2-implementation-plan.md`
 - Phase 3 实施计划：`plans/phase-3-implementation-plan.md`
+- Phase 4 实施计划：`plans/phase-4-implementation-plan.md`
 - Kotlin 模板初始化指南：`INIT_FROM_TEMPLATE.md`
 - 当前交接记录：`tmp/handoff.md`
 - iOS 参考实现：`QMPrompter/`
@@ -93,8 +94,8 @@ Do NOT introduce unless explicitly requested:
 - Current AGP 9.2.0 setup needs `android.builtInKotlin=false` and `android.newDsl=false` in `gradle.properties`; removing either caused Gradle plugin failures.
 - Keep `android.useAndroidX=true` in `gradle.properties`; it is required by `INIT_FROM_TEMPLATE.md`.
 - Manifest must keep camera, microphone, internet permissions, SpeechRecognizer queries, portrait orientation, and backup exclusions for `ai_provider_config.xml`.
-- Keep `MODIFY_AUDIO_SETTINGS` while the SpeechRecognizer PoC or final beep-handling implementation needs audio muting.
-- Current command-line verification is `rtk ./gradlew.bat test --stacktrace` followed by `rtk ./gradlew.bat assembleDebug --stacktrace`; this passed after Phase 3 implementation and subagent-review fixes.
+- `MODIFY_AUDIO_SETTINGS` remains in the manifest from the SpeechRecognizer PoC/history, but final `SpeechFollower` currently does not mute system streams because Phase 1.5 found no audible beep on the tested device.
+- Current command-line verification is `rtk ./gradlew.bat test --stacktrace` followed by `rtk ./gradlew.bat assembleDebug --stacktrace`; this passed after Phase 4 implementation, subagent-review fixes, and the voice-following default-off change.
 - Room uses `exportSchema = true`; keep generated schema files under `app/schemas/` as migration baselines.
 - `Script.createdAt` and `Script.updatedAt` are epoch millis `Long` values, not ISO 8601 strings.
 - `TextColorPreset` stores raw values only (`white`, `silver`, `graphite`); do not add iOS JSON legacy aliases such as `yellow` or `green` unless an explicit data import requirement is added.
@@ -104,16 +105,20 @@ Do NOT introduce unless explicitly requested:
 - `.kotlin/` contains local Kotlin build logs/cache and should not be committed.
 - Phase 1.5 SpeechRecognizer PoC is complete; results live in `plans/phase-1.5-speech-poc-result.md`.
 - On the tested real device, `ERROR_RECOGNIZER_BUSY` was not reproduced.
-- `Destroy/recreate` was more stable than `Delay 150ms`; use destroy/recreate as the first candidate for final `SpeechFollower`.
+- `Destroy/recreate` was more stable than `Delay 150ms`; final `SpeechFollower` uses destroy/recreate with a 150ms restart delay.
 - Observed restart gap with destroy/recreate was about 152ms and acceptable.
 - No audible system beep was heard on the tested device.
-- `ERROR_NO_MATCH` and `ERROR_NETWORK_TIMEOUT` still occur; final `SpeechFollower` must treat them as recoverable and avoid infinite retry.
-- Phase 3 camera preview, scroll engine, prompter screen skeleton, gestures, keep-screen-on, and lightweight camera flip are implemented; next required work is real-device Phase 3 validation, then Phase 4 speech/AI.
-- Keep the temporary speech test entry until final `SpeechFollower` makes it obsolete, but do not expose `Speech PoC`/phase wording in production-facing UI.
+- `ERROR_NO_MATCH` and `ERROR_NETWORK_TIMEOUT` still occur; final `SpeechFollower` treats them as recoverable until thresholds and then fails with readable status instead of retrying forever.
+- Phase 3 camera preview, scroll engine, prompter screen skeleton, gestures, keep-screen-on, and lightweight camera flip are implemented and user-validated on a real device.
+- Phase 4 speech following, current-line highlight, dictation, OpenAI-compatible generation, and AI generation screen are implemented.
+- Voice following is intentionally default off when entering `PrompterScreen`; users manually start it with the top microphone button. Preserve this product decision unless explicitly changed.
+- `Speech PoC`/phase wording must not be exposed in production-facing UI. The PoC Activity/file still exists for reference but the homepage entry is removed.
 - In `ScriptEditorScreen`, empty titles save as `Script.UNTITLED`; font size clamps to 12..110, scroll speed clamps to 20..220, and overlay opacity clamps to 0.18..0.82.
 - `ScriptEditorScreen` explicit save icon/button shows `已保存` snackbar for about 0.5s, offset above the bottom save button; auto-save on back/start-prompter remains silent.
 - Camera transparency UI is the inverse of `Script.overlayOpacity`: display/edit `transparency = 1 - overlayOpacity`, then persist `overlayOpacity = 1 - transparency` with the same 0.18..0.82 clamp.
 - `AppSettingsScreen` uses the existing `AiProviderConfigStore`; Base URL and Model remain optional, with DeepSeek defaults shown as placeholders rather than explanatory in-app text.
+- `OpenAICompatGenerator` uses `AiProviderConfigStore`; empty Base URL and Model fall back to `https://api.deepseek.com` and `deepseek-v4-flash`; DeepSeek-only `thinking: {type: "disabled"}` is added only when the effective base URL contains `deepseek.com`.
+- `AIGenerationScreen` saves generated scripts to Room and navigates to the editor; prompt dictation appends recognized text when typed text already exists instead of replacing it.
 - `rememberSwipeToDismissBoxState(confirmValueChange = ...)` currently emits a Material3 deprecation warning but builds successfully; do not mix Compose API cleanup into feature phases unless explicitly requested.
 - `CameraPreview` uses CameraX `PreviewView` in Compose `AndroidView`; default lens is front camera, with lightweight in-prompter front/back flip.
 - If a requested camera is unavailable, keep a recovery path to the last available lens; do not leave `PrompterScreen` stuck in `Unavailable`.
@@ -122,4 +127,7 @@ Do NOT introduce unless explicitly requested:
 - Prompter text offset should stay draw-phase via `graphicsLayer` or lambda offset; avoid per-frame full recomposition.
 - Prompter drag gestures must use cumulative translation from drag start, not per-event `dragAmount`, for speed/manual-scroll/progress formulas.
 - Top controls need a gesture reserve area so prompter drag zones do not hijack control interactions.
-- Phase 3 still requires real-device validation for camera permission, front/back flip, lock/background recovery, keep-screen-on, and 5k/20k script scroll smoothness.
+- In voice-following mode, taps must not toggle speed playback; center/manual drag stops voice following and allows manual scroll; left/right drag are ignored.
+- Current-line highlight should appear only after `SpeechFollower` has transcript; startup/restart gaps must not falsely highlight the first line.
+- `SpeechFollower` uses a session token to prevent stale delayed restarts from reviving an old recognizer session after rapid stop/start.
+- Final `SpeechFollower` should not reintroduce broad long-lived system stream muting unless a new real-device beep regression requires it and restore behavior is scoped carefully.

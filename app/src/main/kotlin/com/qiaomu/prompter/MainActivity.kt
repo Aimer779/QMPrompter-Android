@@ -1,6 +1,5 @@
 package com.qiaomu.prompter
 
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,14 +8,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.qiaomu.prompter.ai.OpenAICompatGenerator
 import com.qiaomu.prompter.data.ScriptRepository
-import com.qiaomu.prompter.poc.SpeechRecognizerPocActivity
 import com.qiaomu.prompter.settings.AiProviderConfigStore
+import com.qiaomu.prompter.ui.ai.AIGenerationScreen
 import com.qiaomu.prompter.ui.editor.ScriptEditorScreen
 import com.qiaomu.prompter.ui.prompter.PrompterScreen
 import com.qiaomu.prompter.ui.scriptlist.ScriptListScreen
@@ -46,7 +45,6 @@ private fun QMPrompterRoot(
             color = MaterialTheme.colorScheme.background
         ) {
             val navController = rememberNavController()
-            val context = LocalContext.current
             NavHost(
                 navController = navController,
                 startDestination = ROUTE_SCRIPTS
@@ -60,10 +58,8 @@ private fun QMPrompterRoot(
                         onOpenSettings = {
                             navController.navigate(ROUTE_SETTINGS)
                         },
-                        onOpenSpeechPoc = {
-                            context.startActivity(
-                                Intent(context, SpeechRecognizerPocActivity::class.java)
-                            )
+                        onOpenAiGeneration = {
+                            navController.navigate(ROUTE_AI_GENERATION)
                         }
                     )
                 }
@@ -102,6 +98,18 @@ private fun QMPrompterRoot(
                         onBack = { navController.popBackStack() }
                     )
                 }
+                composable(ROUTE_AI_GENERATION) {
+                    AIGenerationScreen(
+                        scriptRepository = scriptRepository,
+                        scriptGenerator = OpenAICompatGenerator(aiProviderConfigStore),
+                        onBack = { navController.popBackStack() },
+                        onGenerated = { scriptId ->
+                            navController.navigate("editor/$scriptId") {
+                                popUpTo(ROUTE_SCRIPTS)
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -109,6 +117,7 @@ private fun QMPrompterRoot(
 
 private const val ROUTE_SCRIPTS = "scripts"
 private const val ROUTE_SETTINGS = "settings"
+private const val ROUTE_AI_GENERATION = "ai-generation"
 private const val ARG_SCRIPT_ID = "scriptId"
 private const val ROUTE_EDITOR = "editor/{$ARG_SCRIPT_ID}"
 private const val ROUTE_PROMPTER = "prompter/{$ARG_SCRIPT_ID}"

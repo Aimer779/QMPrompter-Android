@@ -1,7 +1,11 @@
 package com.qiaomu.prompter.ui.prompter
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.view.WindowManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -20,6 +24,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideocamOff
@@ -42,7 +48,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -55,9 +63,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.qiaomu.prompter.data.Script
 import com.qiaomu.prompter.data.ScriptRepository
 import com.qiaomu.prompter.data.TextColorPreset
+import com.qiaomu.prompter.speech.SpeechFollower
 import com.qiaomu.prompter.ui.camera.CameraPermissionState
 import com.qiaomu.prompter.ui.camera.CameraPreview
 import com.qiaomu.prompter.util.PromptFormatter
@@ -104,6 +114,7 @@ private fun PrompterContent(
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
     val engine = remember(script.id) { ScrollEngine(script.scrollSpeed) }
+    val speechFollower = remember(script.id) { SpeechFollower(context.applicationContext) }
     var cameraState by remember { mutableStateOf(CameraPermissionState.Checking) }
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_FRONT) }
     var lastAvailableLensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_FRONT) }
@@ -112,6 +123,23 @@ private fun PrompterContent(
     var dragStartOffset by remember { mutableDoubleStateOf(0.0) }
     var dragTranslationY by remember { mutableDoubleStateOf(0.0) }
     var viewportHeight by remember { mutableStateOf(0) }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            speechFollower.start(script.content, initialProgress = 0.0)
+        }
+    }
+
+    fun startSpeechFollowing(initialProgress: Double) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            speechFollower.start(script.content, initialProgress)
+        } else {
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     LaunchedEffect(engine) {
         engine.runFrameLoop()
@@ -120,6 +148,7 @@ private fun PrompterContent(
     DisposableEffect(activity) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {
+            speechFollower.dispose()
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
@@ -174,6 +203,12 @@ private fun PrompterContent(
             ?.map { it.characterCount }
             ?.average()
             ?: targetCharacters.toDouble()
+        val speechLineIndex = remember(speechFollower.progress, promptLines) {
+            speechLineIndex(
+                progress = speechFollower.progress,
+                promptLines = promptLines
+            )
+        }
 
         LaunchedEffect(script.scrollSpeed, averageLineHeight, averageCharacters, maximumOffset) {
             engine.configure(
@@ -182,6 +217,19 @@ private fun PrompterContent(
                 averageCharactersPerLine = averageCharacters,
                 maximumOffset = maximumOffset
             )
+        }
+
+        LaunchedEffect(maximumOffset, layouts, speechLineIndex, speechFollower.hasTranscript) {
+            if (speechFollower.isListening && speechFollower.hasTranscript) {
+                val targetOffset = speechTargetOffset(
+                    speechLineIndex = speechLineIndex,
+                    layouts = layouts,
+                    topPadding = topPadding,
+                    viewportHeight = heightPx.toDouble(),
+                    maximumOffset = maximumOffset
+                )
+                engine.follow(to = targetOffset)
+            }
         }
 
         CameraPreview(
@@ -226,6 +274,11 @@ private fun PrompterContent(
             topPadding = topPadding,
             viewportHeight = heightPx.toDouble(),
             engine = engine,
+            highlightedLineIndex = if (speechFollower.isListening && speechFollower.hasTranscript) {
+                speechLineIndex
+            } else {
+                null
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
@@ -235,12 +288,24 @@ private fun PrompterContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = 120.dp),
-            onTap = { engine.toggle() },
+            onTap = {
+                if (!speechFollower.isListening) {
+                    engine.toggle()
+                }
+            },
             onDragStart = { mode ->
-                dragMode = mode
-                dragStartSpeed = engine.speed
-                dragStartOffset = engine.offset
-                dragTranslationY = 0.0
+                if (speechFollower.isListening && mode != DragMode.ManualScroll) {
+                    dragMode = null
+                } else {
+                    if (speechFollower.isListening && mode == DragMode.ManualScroll) {
+                        speechFollower.stop()
+                        engine.stopFollowing()
+                    }
+                    dragMode = mode
+                    dragStartSpeed = engine.speed
+                    dragStartOffset = engine.offset
+                    dragTranslationY = 0.0
+                }
             },
             onDrag = { dragAmount ->
                 dragTranslationY += dragAmount
@@ -270,13 +335,29 @@ private fun PrompterContent(
 
         PrompterControls(
             isPlaying = engine.isPlaying,
+            speechActive = speechFollower.isListening,
+            speechStatus = speechFollower.statusText,
             cameraEnabled = cameraState == CameraPermissionState.Authorized ||
                 cameraState == CameraPermissionState.Unavailable,
             onBack = {
                 engine.pause()
+                speechFollower.dispose()
                 onBack()
             },
             onToggle = { engine.toggle() },
+            onToggleSpeech = {
+                if (speechFollower.isListening) {
+                    speechFollower.stop()
+                    engine.stopFollowing()
+                } else {
+                    val initialProgress = if (maximumOffset > 0) {
+                        engine.offset / maximumOffset
+                    } else {
+                        0.0
+                    }
+                    startSpeechFollowing(initialProgress)
+                }
+            },
             onFlipCamera = {
                 lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
                     CameraSelector.LENS_FACING_BACK
@@ -313,6 +394,7 @@ private fun PromptLayer(
     topPadding: Double,
     viewportHeight: Double,
     engine: ScrollEngine,
+    highlightedLineIndex: Int?,
     modifier: Modifier = Modifier
 ) {
     val visibleRange by remember(layouts, viewportHeight, topPadding) {
@@ -329,10 +411,42 @@ private fun PromptLayer(
     Box(modifier = modifier) {
         visibleRange.forEach { index ->
             val layout = layouts[index]
+            val isHighlighted = layout.index == highlightedLineIndex
+            if (isHighlighted) {
+                Text(
+                    text = lines[layout.index].text,
+                    style = textStyle.copy(
+                        color = Color.White.copy(alpha = 0.46f),
+                        shadow = Shadow(
+                            color = Color.White.copy(alpha = 0.80f),
+                            offset = Offset.Zero,
+                            blurRadius = 18f
+                        )
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .graphicsLayer {
+                            translationY = (topPadding + layout.y - engine.offset).toFloat()
+                        },
+                    textAlign = TextAlign.Center
+                )
+            }
             Text(
                 text = lines[layout.index].text,
-                style = textStyle,
-                color = textStyle.color.copy(alpha = 0.72f),
+                style = if (isHighlighted) {
+                    textStyle.copy(
+                        color = Color.White,
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.88f),
+                            offset = Offset(0f, 2f),
+                            blurRadius = 5f
+                        )
+                    )
+                } else {
+                    textStyle
+                },
+                color = if (isHighlighted) Color.White else textStyle.color.copy(alpha = 0.62f),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
@@ -410,9 +524,12 @@ private fun DragZone(
 @Composable
 private fun PrompterControls(
     isPlaying: Boolean,
+    speechActive: Boolean,
+    speechStatus: String,
     cameraEnabled: Boolean,
     onBack: () -> Unit,
     onToggle: () -> Unit,
+    onToggleSpeech: () -> Unit,
     onFlipCamera: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -425,6 +542,13 @@ private fun PrompterControls(
             Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(onClick = onToggleSpeech) {
+                Icon(
+                    imageVector = if (speechActive) Icons.Default.Mic else Icons.Default.MicOff,
+                    contentDescription = speechStatus,
+                    tint = if (speechActive) Color.White else Color.White.copy(alpha = 0.72f)
+                )
+            }
             IconButton(onClick = onToggle) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -523,6 +647,46 @@ private fun TextColorPreset.promptColor(): Color =
         TextColorPreset.Silver -> Color(0xFFC9CDD4)
         TextColorPreset.Graphite -> Color(0xFF8E949E)
     }
+
+private fun speechLineIndex(progress: Double, promptLines: List<PromptLine>): Int? {
+    if (promptLines.isEmpty()) return null
+
+    val totalCharacters = promptLines.sumOf { line ->
+        speechCharacterCount(line.text)
+    }
+    if (totalCharacters <= 0) return null
+
+    val target = (totalCharacters * progress.coerceIn(0.0, 1.0)).roundToInt()
+    var consumed = 0
+
+    promptLines.forEachIndexed { index, line ->
+        val count = speechCharacterCount(line.text)
+        if (count <= 0) return@forEachIndexed
+
+        consumed += count
+        if (target <= consumed) {
+            return index
+        }
+    }
+
+    return promptLines.indexOfLast { speechCharacterCount(it.text) > 0 }.takeIf { it >= 0 }
+}
+
+private fun speechTargetOffset(
+    speechLineIndex: Int?,
+    layouts: List<PromptLineLayout>,
+    topPadding: Double,
+    viewportHeight: Double,
+    maximumOffset: Double
+): Double {
+    val lineIndex = speechLineIndex ?: return 0.0
+    val layout = layouts.firstOrNull { it.index == lineIndex } ?: return 0.0
+    val desiredLineY = viewportHeight * 0.42
+    return (topPadding + layout.y - desiredLineY).coerceIn(0.0, maximumOffset)
+}
+
+private fun speechCharacterCount(text: String): Int =
+    text.count { it.isLetterOrDigit() }
 
 private fun dragStatusText(mode: DragMode?, engine: ScrollEngine, maximumOffset: Double): String =
     when (mode) {

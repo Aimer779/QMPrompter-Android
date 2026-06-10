@@ -13,9 +13,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -54,7 +54,7 @@ fun ScriptListScreen(
     scriptRepository: ScriptRepository,
     onOpenScript: (String) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenSpeechPoc: () -> Unit,
+    onOpenAiGeneration: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scripts by scriptRepository.scripts.collectAsState()
@@ -80,9 +80,6 @@ fun ScriptListScreen(
             TopAppBar(
                 title = { Text("乔木提词器") },
                 actions = {
-                    IconButton(onClick = onOpenSpeechPoc) {
-                        Icon(Icons.Default.Mic, contentDescription = "语音测试")
-                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -164,6 +161,14 @@ fun ScriptListScreen(
                     title = "新建文稿",
                     onDismiss = { showCreatePanel = false }
                 )
+                GlassActionRow(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "AI 生成",
+                    subtitle = "根据想法生成口播文稿"
+                ) {
+                    showCreatePanel = false
+                    onOpenAiGeneration()
+                }
                 GlassActionRow(
                     icon = Icons.Default.Description,
                     title = "空白文稿",
