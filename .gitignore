@@ -3,6 +3,7 @@ DerivedData/
 build/
 screenshots/
 .gradle/
+.kotlin/
 app/build/
 local.properties
 .idea/

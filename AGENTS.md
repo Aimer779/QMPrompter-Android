@@ -26,14 +26,16 @@ Do NOT introduce unless explicitly requested:
 - Extra abstraction, configuration, or provider systems beyond the migration plan
 
 ### Common Command
-- Build debug APK: `.\gradlew.bat assembleDebug`
-- Test: `.\gradlew.bat test`
+- Build debug APK: `rtk ./gradlew.bat assembleDebug --stacktrace`
+- Test: `rtk ./gradlew.bat test --stacktrace`
 - Show Gradle version: `.\gradlew.bat --version`
 - Search code/text: `rtk rg "<pattern>"`
 - Check working tree: `rtk git status --short --branch`
+- Run Gradle verification sequentially. Do not run `test` and `assembleDebug` in parallel; Kotlin incremental compilation can race on `app/build/tmp/kotlin-classes`.
 
 ## Project Context
 - Android 迁移计划：`MIGRATION_PLAN.md`
+- Phase 1 实施计划：`plans/phase-1-implementation-plan.md`
 - Kotlin 模板初始化指南：`INIT_FROM_TEMPLATE.md`
 - 当前交接记录：`tmp/handoff.md`
 - iOS 参考实现：`QMPrompter/`
@@ -86,4 +88,11 @@ Do NOT introduce unless explicitly requested:
 - Current AGP 9.2.0 setup needs `android.builtInKotlin=false` and `android.newDsl=false` in `gradle.properties`; removing either caused Gradle plugin failures.
 - Keep `android.useAndroidX=true` in `gradle.properties`; it is required by `INIT_FROM_TEMPLATE.md`.
 - Manifest must keep camera, microphone, internet permissions, SpeechRecognizer queries, portrait orientation, and backup exclusions for `ai_provider_config.xml`.
-- A successful skeleton verification is `.\gradlew.bat assembleDebug` plus `.\gradlew.bat test`.
+- A successful Phase 1 data-layer verification is `rtk ./gradlew.bat test --stacktrace` followed by `rtk ./gradlew.bat assembleDebug --stacktrace`.
+- Room uses `exportSchema = true`; keep generated schema files under `app/schemas/` as migration baselines.
+- `Script.createdAt` and `Script.updatedAt` are epoch millis `Long` values, not ISO 8601 strings.
+- `TextColorPreset` stores raw values only (`white`, `silver`, `graphite`); do not add iOS JSON legacy aliases such as `yellow` or `green` unless an explicit data import requirement is added.
+- First-run sample data is seeded from `RoomDatabase.Callback.onCreate()` with `SupportSQLiteDatabase.execSQL`; avoid singleton/coroutine fire-and-forget seeding.
+- `AiProviderConfigStore` uses SharedPreferences name `ai_provider_config`, which maps to backup exclusion path `ai_provider_config.xml`; keep these aligned.
+- `PromptFormatter` is ported from iOS with focused JUnit tests; code point counting is acceptable for the Chinese/ASCII punctuation parity target, while emoji grapheme cluster parity is not a Phase 1 requirement.
+- `.kotlin/` contains local Kotlin build logs/cache and should not be committed.
