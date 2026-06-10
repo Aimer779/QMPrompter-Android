@@ -2,7 +2,10 @@ package com.qiaomu.prompter.ui.prompter
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cameraswitch
@@ -29,6 +33,7 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,13 +68,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.qiaomu.prompter.data.Script
 import com.qiaomu.prompter.data.ScriptRepository
 import com.qiaomu.prompter.data.TextColorPreset
 import com.qiaomu.prompter.speech.SpeechFollower
 import com.qiaomu.prompter.ui.camera.CameraPermissionState
 import com.qiaomu.prompter.ui.camera.CameraPreview
+import com.qiaomu.prompter.ui.component.glassSurface
 import com.qiaomu.prompter.util.PromptFormatter
 import com.qiaomu.prompter.util.PromptLine
 import kotlinx.coroutines.launch
@@ -116,27 +128,54 @@ private fun PrompterContent(
     val engine = remember(script.id) { ScrollEngine(script.scrollSpeed) }
     val speechFollower = remember(script.id) { SpeechFollower(context.applicationContext) }
     var cameraState by remember { mutableStateOf(CameraPermissionState.Checking) }
+    var cameraPermissionRequestKey by remember { mutableStateOf(0) }
+    var audioPermissionState by remember {
+        mutableStateOf(
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                AudioPermissionState.Authorized
+            } else {
+                AudioPermissionState.NotRequested
+            }
+        )
+    }
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_FRONT) }
     var lastAvailableLensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_FRONT) }
     var dragMode by remember { mutableStateOf<DragMode?>(null) }
     var dragStartSpeed by remember { mutableDoubleStateOf(0.0) }
     var dragStartOffset by remember { mutableDoubleStateOf(0.0) }
     var dragTranslationY by remember { mutableDoubleStateOf(0.0) }
+    var pendingSpeechInitialProgress by remember { mutableDoubleStateOf(0.0) }
     var viewportHeight by remember { mutableStateOf(0) }
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            speechFollower.start(script.content, initialProgress = 0.0)
+            audioPermissionState = AudioPermissionState.Authorized
+            speechFollower.start(script.content, initialProgress = pendingSpeechInitialProgress)
+        } else {
+            audioPermissionState = audioDeniedState(activity)
         }
+    }
+
+    fun openAppSettings() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", context.packageName, null)
+        )
+        context.startActivity(intent)
     }
 
     fun startSpeechFollowing(initialProgress: Double) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         ) {
+            audioPermissionState = AudioPermissionState.Authorized
             speechFollower.start(script.content, initialProgress)
         } else {
+            pendingSpeechInitialProgress = initialProgress
+            audioPermissionState = AudioPermissionState.Requesting
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
@@ -147,9 +186,38 @@ private fun PrompterContent(
 
     DisposableEffect(activity) {
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        activity?.window?.let { window ->
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
         onDispose {
             speechFollower.dispose()
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity?.window?.let { window ->
+                WindowInsetsControllerCompat(window, window.decorView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
+        }
+    }
+
+    DisposableEffect(context) {
+        val lifecycleOwner = activity as? androidx.lifecycle.LifecycleOwner
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                audioPermissionState = AudioPermissionState.Authorized
+            }
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        onDispose {
+            lifecycleOwner?.lifecycle?.removeObserver(observer)
         }
     }
 
@@ -234,6 +302,7 @@ private fun PrompterContent(
 
         CameraPreview(
             lensFacing = lensFacing,
+            permissionRequestKey = cameraPermissionRequestKey,
             onPermissionStateChange = {
                 cameraState = it
                 if (it == CameraPermissionState.Authorized) {
@@ -263,6 +332,8 @@ private fun PrompterContent(
         if (cameraState != CameraPermissionState.Authorized) {
             CameraStatus(
                 state = cameraState,
+                onRetry = { cameraPermissionRequestKey++ },
+                onOpenSettings = ::openAppSettings,
                 modifier = Modifier.align(Alignment.Center)
             )
         }
@@ -337,6 +408,7 @@ private fun PrompterContent(
             isPlaying = engine.isPlaying,
             speechActive = speechFollower.isListening,
             speechStatus = speechFollower.statusText,
+            audioPermissionState = audioPermissionState,
             cameraEnabled = cameraState == CameraPermissionState.Authorized ||
                 cameraState == CameraPermissionState.Unavailable,
             onBack = {
@@ -349,6 +421,8 @@ private fun PrompterContent(
                 if (speechFollower.isListening) {
                     speechFollower.stop()
                     engine.stopFollowing()
+                } else if (audioPermissionState == AudioPermissionState.PermanentlyDenied) {
+                    openAppSettings()
                 } else {
                     val initialProgress = if (maximumOffset > 0) {
                         engine.offset / maximumOffset
@@ -526,6 +600,7 @@ private fun PrompterControls(
     isPlaying: Boolean,
     speechActive: Boolean,
     speechStatus: String,
+    audioPermissionState: AudioPermissionState,
     cameraEnabled: Boolean,
     onBack: () -> Unit,
     onToggle: () -> Unit,
@@ -538,18 +613,37 @@ private fun PrompterControls(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onBack) {
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .size(42.dp)
+                .glassSurface(CircleShape)
+        ) {
             Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(onClick = onToggleSpeech) {
+            IconButton(
+                onClick = onToggleSpeech,
+                modifier = Modifier
+                    .size(42.dp)
+                    .glassSurface(CircleShape)
+            ) {
                 Icon(
                     imageVector = if (speechActive) Icons.Default.Mic else Icons.Default.MicOff,
-                    contentDescription = speechStatus,
-                    tint = if (speechActive) Color.White else Color.White.copy(alpha = 0.72f)
+                    contentDescription = audioPermissionState.statusText(speechStatus),
+                    tint = when {
+                        speechActive -> Color.White
+                        audioPermissionState == AudioPermissionState.PermanentlyDenied -> MaterialTheme.colorScheme.error
+                        else -> Color.White.copy(alpha = 0.72f)
+                    }
                 )
             }
-            IconButton(onClick = onToggle) {
+            IconButton(
+                onClick = onToggle,
+                modifier = Modifier
+                    .size(42.dp)
+                    .glassSurface(CircleShape)
+            ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (isPlaying) "暂停" else "播放",
@@ -558,7 +652,10 @@ private fun PrompterControls(
             }
             IconButton(
                 onClick = onFlipCamera,
-                enabled = cameraEnabled
+                enabled = cameraEnabled,
+                modifier = Modifier
+                    .size(42.dp)
+                    .glassSurface(CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Default.Cameraswitch,
@@ -573,6 +670,8 @@ private fun PrompterControls(
 @Composable
 private fun CameraStatus(
     state: CameraPermissionState,
+    onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -591,12 +690,32 @@ private fun CameraStatus(
                 CameraPermissionState.Checking -> "正在请求相机权限"
                 CameraPermissionState.Authorized -> ""
                 CameraPermissionState.Denied -> "相机权限未开启"
+                CameraPermissionState.PermanentlyDenied -> "相机权限未开启"
                 CameraPermissionState.Unavailable -> "摄像头不可用"
             },
             color = Color.White,
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center
         )
+        if (state == CameraPermissionState.Denied || state == CameraPermissionState.PermanentlyDenied) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = if (state == CameraPermissionState.PermanentlyDenied) {
+                    "请到系统设置里允许乔木提词器访问相机。"
+                } else {
+                    "允许相机权限后可以显示取景画面。"
+                },
+                color = Color.White.copy(alpha = 0.76f),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(
+                onClick = if (state == CameraPermissionState.PermanentlyDenied) onOpenSettings else onRetry
+            ) {
+                Text(if (state == CameraPermissionState.PermanentlyDenied) "去系统设置" else "重新授权")
+            }
+        }
     }
 }
 
@@ -709,4 +828,28 @@ private enum class DragMode {
     Speed,
     ManualScroll,
     Progress
+}
+
+private enum class AudioPermissionState {
+    NotRequested,
+    Requesting,
+    Authorized,
+    Denied,
+    PermanentlyDenied
+}
+
+private fun AudioPermissionState.statusText(fallback: String): String =
+    when (this) {
+        AudioPermissionState.NotRequested -> fallback
+        AudioPermissionState.Requesting -> "正在请求麦克风权限"
+        AudioPermissionState.Authorized -> fallback
+        AudioPermissionState.Denied -> "麦克风权限未开启"
+        AudioPermissionState.PermanentlyDenied -> "去系统设置开启麦克风"
+    }
+
+private fun audioDeniedState(activity: Activity?): AudioPermissionState {
+    val canAskAgain = activity?.let {
+        ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.RECORD_AUDIO)
+    } ?: true
+    return if (canAskAgain) AudioPermissionState.Denied else AudioPermissionState.PermanentlyDenied
 }

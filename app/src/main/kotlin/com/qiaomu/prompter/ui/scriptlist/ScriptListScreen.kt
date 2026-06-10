@@ -1,28 +1,33 @@
 package com.qiaomu.prompter.ui.scriptlist
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -38,14 +43,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.qiaomu.prompter.data.Script
 import com.qiaomu.prompter.data.ScriptRepository
 import com.qiaomu.prompter.ui.component.GlassActionPanel
 import com.qiaomu.prompter.ui.component.GlassActionRow
 import com.qiaomu.prompter.ui.component.GlassPanelHeader
+import com.qiaomu.prompter.ui.component.glassSurface
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,15 +89,31 @@ fun ScriptListScreen(
             TopAppBar(
                 title = { Text("乔木提词器") },
                 actions = {
-                    IconButton(onClick = onOpenSettings) {
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .glassSurface(CircleShape)
+                    ) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showCreatePanel = true }) {
-                Icon(Icons.Default.Add, contentDescription = "新建")
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .glassSurface(CircleShape)
+                    .clickable(onClick = { showCreatePanel = true }),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "新建",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(30.dp)
+                )
             }
         }
     ) { paddingValues ->
@@ -103,11 +128,9 @@ fun ScriptListScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                OutlinedTextField(
+                GlassSearchField(
                     value = searchText,
                     onValueChange = { searchText = it },
-                    placeholder = { Text("搜索文稿") },
-                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -184,6 +207,57 @@ fun ScriptListScreen(
             }
         }
     }
+}
+
+@Composable
+private fun GlassSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = 56.dp
+) {
+    val shape = RoundedCornerShape(16.dp)
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.merge(
+            TextStyle(color = MaterialTheme.colorScheme.onSurface)
+        ),
+        modifier = modifier
+            .height(height)
+            .clip(shape)
+            .glassSurface(shape),
+        decorationBox = { innerTextField ->
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(PaddingValues(horizontal = 16.dp)),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = "搜索文稿",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        }
+    )
 }
 
 @Composable

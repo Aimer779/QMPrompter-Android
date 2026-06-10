@@ -1,4 +1,4 @@
-# Handoff - Phase 4 Implemented
+# Handoff - Phase 5 Implemented
 
 ## Project Goal
 
@@ -12,31 +12,28 @@ Feature target: parity with the current iOS app using Jetpack Compose, Room, Cam
 - Phase 1.5 complete: disposable `SpeechRecognizer` continuous-listening PoC implemented and tested on a real device.
 - Phase 2 complete: list, editor, reusable glass action panel, and AI provider settings UI.
 - Phase 3 complete and manually validated by the user on a real device.
-- Phase 4 implemented:
-  - final speech-following implementation
-  - `SpeechScriptIndex` port and unit tests
-  - current-line highlighting while voice following
-  - AI prompt dictation
-  - OpenAI-compatible AI script generation
-  - AI generation screen and homepage entry
-- Product decision after validation: voice following is **default off** when entering the prompter. Users manually enable it with the top microphone button.
-- `Speech PoC` is no longer exposed in the production homepage UI. The PoC Activity/file still exists for reference and was not deleted.
+- Phase 4 complete: speech following, current-line highlighting, dictation, OpenAI-compatible generation, AI generation screen.
+- Phase 5 implemented:
+  - prompter-only immersive mode
+  - scoped system bar restoration on exit
+  - camera denied/permanently-denied UI with retry/settings actions
+  - microphone denied/permanently-denied handling with settings action
+  - glass surface polish for shared panels, homepage FAB/settings action, action rows, and prompter controls
+  - Phase 5 plan saved at `plans/phase-5-implementation-plan.md`
+- Product decision preserved: voice following is **default off** when entering `PrompterScreen`. Users manually enable it with the top microphone button.
+- `Speech PoC` is still not exposed in the production homepage UI. The PoC Activity/file remains for reference.
 
 Current git state at this handoff:
 
 - Branch: `main`
-- Branch relation: `main...origin/main [ahead 5]`
-- Worktree has uncommitted Phase 4 changes:
+- Branch relation before final status check: `main...origin/main [ahead 6]`
+- Worktree has Phase 5 changes:
   - Modified:
-    - `app/src/main/kotlin/com/qiaomu/prompter/MainActivity.kt`
+    - `app/src/main/kotlin/com/qiaomu/prompter/ui/camera/CameraPreview.kt`
+    - `app/src/main/kotlin/com/qiaomu/prompter/ui/component/GlassActionPanel.kt`
     - `app/src/main/kotlin/com/qiaomu/prompter/ui/prompter/PrompterScreen.kt`
-    - `app/src/main/kotlin/com/qiaomu/prompter/ui/scriptlist/ScriptListScreen.kt`
   - Untracked:
-    - `app/src/main/kotlin/com/qiaomu/prompter/ai/`
-    - `app/src/main/kotlin/com/qiaomu/prompter/speech/`
-    - `app/src/main/kotlin/com/qiaomu/prompter/ui/ai/`
-    - `app/src/test/kotlin/com/qiaomu/prompter/speech/`
-    - `plans/phase-4-implementation-plan.md`
+    - `plans/phase-5-implementation-plan.md`
     - `tmp/handoff.md`
 
 ## Tooling
@@ -55,105 +52,72 @@ Common commands:
 
 Run Gradle verification sequentially. Do not run `test` and `assembleDebug` in parallel; Kotlin incremental compilation can race on `app/build/tmp/kotlin-classes`.
 
-## Phase 4 Plan
-
-The Phase 4 implementation plan is saved at:
-
-- `plans/phase-4-implementation-plan.md`
-
-The plan originally followed `MIGRATION_PLAN.md` Phase 4. One intentional product change was made after user validation:
-
-- Voice following does **not** auto-start on entering `PrompterScreen`; it starts only when the user taps the microphone button.
-
-This intentionally differs from `MIGRATION_PLAN.md` item 25 and should be preserved unless the user changes their mind.
-
-## Phase 4 Implementation Summary
+## Phase 5 Implementation Summary
 
 New files:
 
-- `app/src/main/kotlin/com/qiaomu/prompter/speech/SpeechScriptIndex.kt`
-  - Kotlin port of iOS `SpeechScriptIndex`.
-  - Normalizes content/transcripts to letters and digits.
-  - Uses candidate fragments, committed offset, plausibility checks, and scoring.
-  - Keeps progress monotonic.
-
-- `app/src/test/kotlin/com/qiaomu/prompter/speech/SpeechScriptIndexTest.kt`
-  - Focused JUnit tests for normalization, Chinese transcript progress, monotonic progress, initial-progress anchoring, and empty input.
-
-- `app/src/main/kotlin/com/qiaomu/prompter/speech/SpeechFollower.kt`
-  - Android `SpeechRecognizer`-based continuous listener.
-  - States: `Idle`, `Starting`, `Listening`, `RestartPending`, `Denied`, `Unavailable`, `Disposed`, `Failed`.
-  - Uses destroy/recreate restart strategy with `150ms` delay.
-  - Uses `sessionToken` so stale delayed restarts cannot revive an old session.
-  - Treats `ERROR_NO_MATCH`, `ERROR_SPEECH_TIMEOUT`, and `ERROR_NETWORK_TIMEOUT` as recoverable until thresholds.
-  - Counts busy/network/recoverable failures and fails with readable messages instead of retrying forever.
-  - Does not mute system audio streams. Phase 1.5 found no audible beep on the tested device; broad muting was removed after review.
-
-- `app/src/main/kotlin/com/qiaomu/prompter/speech/PromptDictation.kt`
-  - Simpler `SpeechRecognizer` wrapper for AI prompt voice input.
-  - Exposes `isRecording`, `transcript`, and `errorMessage`.
-  - Cleans up recognizer on stop.
-
-- `app/src/main/kotlin/com/qiaomu/prompter/ai/ScriptGenerator.kt`
-  - Minimal generator interface plus `ScriptGenerationException`.
-
-- `app/src/main/kotlin/com/qiaomu/prompter/ai/OpenAICompatGenerator.kt`
-  - OkHttp implementation for OpenAI-compatible `/chat/completions`.
-  - Uses `AiProviderConfigStore`.
-  - Empty base URL/model fall back to:
-    - `https://api.deepseek.com`
-    - `deepseek-v4-flash`
-  - Adds DeepSeek-only `thinking: { type: "disabled" }` only when effective base URL contains `deepseek.com`.
-  - Uses `max_tokens: 2800`, non-streaming requests, iOS system prompt, and generated-script cleanup logic.
-
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/ai/AIGenerationScreen.kt`
-  - Prompt text input.
-  - Voice input button using `PromptDictation`.
-  - Generate button using `ScriptGenerator`.
-  - Saves generated content as a new `Script`.
-  - Navigates to the editor for the generated script.
-  - If prompt already has typed text, dictation appends instead of replacing.
+- `plans/phase-5-implementation-plan.md`
+  - Scope, implementation approach, iOS references, Android files, and acceptance checklist.
 
 Modified files:
 
-- `app/src/main/kotlin/com/qiaomu/prompter/MainActivity.kt`
-  - Adds `ai-generation` route.
-  - Instantiates `OpenAICompatGenerator`.
-  - Routes generated scripts to the editor.
-  - Removes production homepage `Speech PoC` entry wiring.
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/prompter/PrompterScreen.kt`
+  - Hides system bars while the prompter is active and restores them on dispose.
+  - Keeps existing `FLAG_KEEP_SCREEN_ON` behavior.
+  - Adds app settings deep link for permanently denied camera/microphone permissions.
+  - Tracks microphone permission states: not requested, requesting, authorized, denied, permanently denied.
+  - Preserves pending speech initial progress while waiting for microphone permission.
+  - Shows camera retry/settings actions through `CameraStatus`.
+  - Applies shared `glassSurface(CircleShape)` to top prompter controls.
+
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/camera/CameraPreview.kt`
+  - Adds `CameraPermissionState.PermanentlyDenied`.
+  - Adds `permissionRequestKey` for explicit retry.
+  - Distinguishes denied-once from permanently denied using `shouldShowRequestPermissionRationale`.
+  - Refreshes authorization state on resume after returning from system settings.
+
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/component/GlassActionPanel.kt`
+  - Slightly strengthens API 31+ glass tint while keeping API 26-30 fallback.
+  - Keeps the shared surface readable instead of blurring the entire composable layer, which made text/icons soft with the current Compose API surface.
+  - Applies shared glass styling to the panel close button, action rows, and row icon circles.
 
 - `app/src/main/kotlin/com/qiaomu/prompter/ui/scriptlist/ScriptListScreen.kt`
-  - Adds `AI 生成` action in the create panel.
-  - Keeps `空白文稿`.
-  - Removes visible speech PoC button from homepage.
+  - Applies shared glass styling to the homepage settings icon button.
+  - Applies shared glass styling to the homepage FAB while preserving the existing create-panel behavior.
 
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/prompter/PrompterScreen.kt`
-  - Adds `SpeechFollower` integration.
-  - Adds top microphone toggle.
-  - Voice following starts manually only.
-  - When voice following has transcript, progress maps to current line and target scroll offset.
-  - Current line renders white with glow/shadow; non-highlight lines render at 62% alpha.
-  - Startup/restart pending states do not highlight the first line before transcript exists.
-  - In voice-following mode:
-    - taps do not toggle speed playback
-    - center/manual drag stops voice following and allows manual scroll
-    - left/right drag are ignored
-  - Disposes speech follower on exit.
+## iOS Reference Paths
 
-## Subagent Review Fixes
+General references:
 
-A subagent reviewed the Phase 4 implementation against `plans/phase-4-implementation-plan.md` and `MIGRATION_PLAN.md`.
+- `QMPrompter/Models/Script.swift`
+- `QMPrompter/Services/ScriptStore.swift`
+- `QMPrompter/Utilities/PromptFormatter.swift`
+- `QMPrompter/Views/ScriptListView.swift`
+- `QMPrompter/Views/ScriptEditorView.swift`
+- `QMPrompter/Views/GlassActionPanel.swift`
+- `QMPrompter/Views/AppSettingsView.swift`
 
-Findings fixed:
+Prompter/Phase 5 references:
 
-- Stale delayed restarts in `SpeechFollower` could race with rapid stop/start. Fixed with `sessionToken`.
-- Broad long-lived stream muting could mute media/notifications for the whole prompt session. Removed system audio muting.
-- First line could be highlighted during `Starting`/`RestartPending` before any speech was recognized. Fixed by requiring `hasTranscript` for highlight/follow.
-- AI dictation could replace typed prompt text. Fixed by appending dictation when prompt already has text.
+- `QMPrompter/Views/PrompterView.swift`
+  - `.statusBarHidden(true)`, `.persistentSystemOverlays(.hidden)`, `cameraStatusView`, `glassCapsule()`, `glassCircle()`, `glassPanel()`.
+- `QMPrompter/Views/GlassActionPanel.swift`
+  - Bottom action panel surface, row surface, tint, border, and shadow values.
+- `QMPrompter/Services/SpeechFollower.swift`
+  - Speech state/status wording reference.
+
+Phase 4 references:
+
+- `QMPrompter/Services/SpeechFollower.swift`
+- `QMPrompter/Services/PromptDictation.swift`
+- `QMPrompter/Services/DeepSeekScriptGenerator.swift`
+- `QMPrompter/Views/AIGenerationView.swift`
+- `QMPrompter/Views/PrompterView.swift`
+- `QMPrompter/Views/ScriptListView.swift`
 
 ## Verification
 
-Latest command verification passed after the default-off voice-following change:
+Latest command verification passed after Phase 5 implementation:
 
 - `rtk ./gradlew.bat test --stacktrace`
 - `rtk ./gradlew.bat assembleDebug --stacktrace`
@@ -162,29 +126,29 @@ Known warnings:
 
 - Existing AGP warnings about deprecated `android.builtInKotlin=false`, `android.newDsl=false`, and obsolete variant APIs.
 - Existing/expected Compose warning: `Icons.Default.ArrowBack` deprecated in favor of AutoMirrored.
-- Existing Material3 warning: `rememberSwipeToDismissBoxState(confirmValueChange = ...)` deprecated.
-
-These warnings were intentionally not mixed into Phase 4 cleanup.
+- New warning from current dependency surface: `LocalLifecycleOwner` moved to `androidx.lifecycle.compose`; left as-is to avoid mixing dependency/API cleanup into Phase 5.
 
 ## Manual Acceptance To Run Next
 
 Run on a real device:
 
-1. Homepage create panel shows `AI 生成` and `空白文稿`.
-2. Homepage does not show `Speech PoC` or phase/test wording.
-3. Entering prompter does not request microphone and does not auto-start voice following.
-4. Top microphone button requests microphone permission and starts voice following.
-5. When speech is recognized, current line highlights and scrolling follows smoothly.
-6. Startup/restart gaps do not highlight the first line before transcript exists.
-7. Silence/no match/network timeout recovers or fails with readable status; no infinite retry.
-8. Rapidly toggle microphone on/off; no duplicate recognizer loop or stuck microphone.
-9. Manual center drag during voice following stops voice following and allows manual scroll.
-10. Exit prompter; microphone is released.
-11. AI generation with only API Key uses DeepSeek defaults.
-12. AI generation with a third-party OpenAI-compatible base URL/model works.
-13. Missing API Key, no network, HTTP failure, and empty response show readable errors.
-14. Generated script is saved, appears in the list, opens in editor, and survives app restart.
-15. AI prompt dictation works; if text already exists, speech text appends instead of replacing.
+1. Entering the prompter hides status and navigation bars.
+2. Leaving the prompter restores status and navigation bars on list/editor/settings screens.
+3. The screen stays awake while the prompter is active.
+4. First camera permission grant shows the preview.
+5. Camera denied once shows a readable retry path.
+6. Camera permanently denied shows a system settings action, and returning from settings refreshes the camera state.
+7. Camera unavailable is not presented as a permission problem.
+8. Microphone permission is requested only after tapping the microphone button.
+9. Microphone denied once shows readable status and allows another user-triggered attempt.
+10. Microphone permanently denied opens app details settings from the microphone button.
+11. Speech recognition unavailable remains a speech status, separate from microphone permission denial.
+12. Glass panels and prompter controls remain readable on API 31+ and API 26-30.
+13. Homepage FAB and settings button use the same glass visual language and remain tappable/readable.
+14. 5k and 20k character scripts still scroll without obvious new jank.
+15. Voice following is still default off; microphone starts it manually.
+16. Current-line highlight still works after speech is recognized.
+17. AI generation remains reachable from the homepage create panel.
 
 ## Constraints To Preserve
 
@@ -206,42 +170,15 @@ Run on a real device:
 - `PromptFormatter` code point counting is acceptable for current parity target.
 - `.kotlin/` is local build cache/log output and should not be committed.
 
-## iOS Reference Paths
-
-General references:
-
-- `QMPrompter/Models/Script.swift`
-- `QMPrompter/Services/ScriptStore.swift`
-- `QMPrompter/Utilities/PromptFormatter.swift`
-- `QMPrompter/Views/ScriptListView.swift`
-- `QMPrompter/Views/ScriptEditorView.swift`
-- `QMPrompter/Views/GlassActionPanel.swift`
-- `QMPrompter/Views/AppSettingsView.swift`
-
-Phase 3 references:
-
-- `QMPrompter/Views/PrompterView.swift`
-- `QMPrompter/Services/ScrollEngine.swift`
-- `QMPrompter/Services/CameraPreview.swift`
-
-Phase 4 references:
-
-- `QMPrompter/Services/SpeechFollower.swift`
-- `QMPrompter/Services/PromptDictation.swift`
-- `QMPrompter/Services/DeepSeekScriptGenerator.swift`
-- `QMPrompter/Views/AIGenerationView.swift`
-- `QMPrompter/Views/PrompterView.swift`
-- `QMPrompter/Views/ScriptListView.swift`
-
 ## Next Recommended Work
 
 Immediate next steps:
 
 1. Install the debug APK on a real device.
-2. Run the manual Phase 4 acceptance checklist above, especially voice-following toggle/restart behavior and AI provider error paths.
-3. If manual validation passes, commit Phase 4 changes including new untracked directories and `plans/phase-4-implementation-plan.md`.
+2. Run the manual Phase 5 acceptance checklist above, especially permission denial/permanent denial paths and system bar restoration.
+3. If manual validation passes, commit Phase 5 changes including `plans/phase-5-implementation-plan.md`.
 
-Likely later work:
+Optional cleanup only if requested:
 
-- Phase 5 from `MIGRATION_PLAN.md`: immersive mode, final glass polish, and broader permission-denial/settings guidance.
-- Optional cleanup only if requested: remove or archive `SpeechRecognizerPocActivity` and its manifest entry after final speech following is trusted.
+- Remove or archive `SpeechRecognizerPocActivity` and its manifest entry after final speech following is trusted.
+- Revisit true background-only blur with a dedicated View/RenderNode implementation if the current glass polish is not visually sufficient.

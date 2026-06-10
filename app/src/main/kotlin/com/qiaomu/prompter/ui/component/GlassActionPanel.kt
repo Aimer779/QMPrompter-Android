@@ -1,5 +1,6 @@
 package com.qiaomu.prompter.ui.component
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -41,10 +41,11 @@ fun Modifier.glassSurface(
     this
         .clip(shape)
         .background(
-            brush = Brush.verticalGradient(
+            brush = Brush.linearGradient(
                 colors = listOf(
-                    Color.White.copy(alpha = 0.34f),
-                    Color.White.copy(alpha = 0.16f)
+                    Color.White.copy(alpha = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) 0.42f else 0.34f),
+                    Color.White.copy(alpha = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) 0.24f else 0.18f),
+                    Color.White.copy(alpha = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) 0.34f else 0.26f)
                 )
             )
         )
@@ -52,9 +53,20 @@ fun Modifier.glassSurface(
             width = 1.dp,
             brush = Brush.linearGradient(
                 colors = listOf(
-                    Color.White.copy(alpha = 0.62f),
-                    Color.White.copy(alpha = 0.20f),
-                    Color.Black.copy(alpha = 0.08f)
+                    Color.White.copy(alpha = 0.82f),
+                    Color.White.copy(alpha = 0.18f),
+                    Color.White.copy(alpha = 0.58f)
+                )
+            ),
+            shape = shape
+        )
+        .border(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.Black.copy(alpha = 0.16f),
+                    Color.Transparent,
+                    Color.Black.copy(alpha = 0.14f)
                 )
             ),
             shape = shape
@@ -109,7 +121,7 @@ fun GlassPanelHeader(
             modifier = Modifier
                 .size(34.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.32f))
+                .glassSurface(CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Default.Close,
@@ -128,35 +140,39 @@ fun GlassActionRow(
     destructive: Boolean = false,
     onClick: () -> Unit
 ) {
-    Surface(
-        onClick = onClick,
-        color = Color.White.copy(alpha = 0.30f),
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glassSurface(RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .glassSurface(CircleShape),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (subtitle != null) {
                 Text(
-                    text = title,
-                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (subtitle != null) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
         }
     }

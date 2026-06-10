@@ -42,6 +42,7 @@ Do NOT introduce unless explicitly requested:
 - Phase 2 实施计划：`plans/phase-2-implementation-plan.md`
 - Phase 3 实施计划：`plans/phase-3-implementation-plan.md`
 - Phase 4 实施计划：`plans/phase-4-implementation-plan.md`
+- Phase 5 实施计划：`plans/phase-5-implementation-plan.md`
 - Kotlin 模板初始化指南：`INIT_FROM_TEMPLATE.md`
 - 当前交接记录：`tmp/handoff.md`
 - iOS 参考实现：`QMPrompter/`
@@ -111,8 +112,18 @@ Do NOT introduce unless explicitly requested:
 - `ERROR_NO_MATCH` and `ERROR_NETWORK_TIMEOUT` still occur; final `SpeechFollower` treats them as recoverable until thresholds and then fails with readable status instead of retrying forever.
 - Phase 3 camera preview, scroll engine, prompter screen skeleton, gestures, keep-screen-on, and lightweight camera flip are implemented and user-validated on a real device.
 - Phase 4 speech following, current-line highlight, dictation, OpenAI-compatible generation, and AI generation screen are implemented.
+- Phase 5 immersive mode, system-bar restoration, permission-denial/settings guidance, and glass UI polish are implemented.
+- Current command-line verification after Phase 5/UI polish is `rtk ./gradlew.bat test --stacktrace` followed by `rtk ./gradlew.bat assembleDebug --stacktrace`; this passed after the latest editor-title-dialog opacity fix.
 - Voice following is intentionally default off when entering `PrompterScreen`; users manually start it with the top microphone button. Preserve this product decision unless explicitly changed.
 - `Speech PoC`/phase wording must not be exposed in production-facing UI. The PoC Activity/file still exists for reference but the homepage entry is removed.
+- `glassSurface()` uses a diagonal glass treatment: left-top/right-bottom highlights and left-bottom/right-top darker edges. Preserve this direction because it keeps small card metadata readable.
+- Do not apply `Modifier.blur()` directly to glass controls; it blurs text/icons too. True background-only blur should be a dedicated View/RenderNode implementation if needed.
+- Do not wrap Material3 `FloatingActionButton` directly with `glassSurface()`; it creates a double-container effect. The homepage FAB is intentionally a custom `Box + glassSurface(CircleShape)`.
+- `ScriptListScreen` uses a custom `GlassSearchField` based on `BasicTextField`; keep the search field visually lighter than script cards and avoid reverting it to a hard `OutlinedTextField`.
+- `ScriptEditorScreen` uses glass-styled top icon buttons, a custom `GlassSegmentedTabs`, a glass `BasicTextField` body editor, and a bottom glass save/start action row.
+- Multiple glass circle buttons in `TopAppBar` actions must be wrapped in a `Row` with explicit spacing to avoid overlapping outer circles.
+- `ScriptEditorScreen` title editing uses custom `TitleEditDialog`; do not revert to default `AlertDialog` unless explicitly requested.
+- `TitleEditDialog` uses a high-opacity `dialogGlassSurface()` so underlying editor text does not show through and reduce readability.
 - In `ScriptEditorScreen`, empty titles save as `Script.UNTITLED`; font size clamps to 12..110, scroll speed clamps to 20..220, and overlay opacity clamps to 0.18..0.82.
 - `ScriptEditorScreen` explicit save icon/button shows `已保存` snackbar for about 0.5s, offset above the bottom save button; auto-save on back/start-prompter remains silent.
 - Camera transparency UI is the inverse of `Script.overlayOpacity`: display/edit `transparency = 1 - overlayOpacity`, then persist `overlayOpacity = 1 - transparency` with the same 0.18..0.82 clamp.
@@ -121,8 +132,10 @@ Do NOT introduce unless explicitly requested:
 - `AIGenerationScreen` saves generated scripts to Room and navigates to the editor; prompt dictation appends recognized text when typed text already exists instead of replacing it.
 - `rememberSwipeToDismissBoxState(confirmValueChange = ...)` currently emits a Material3 deprecation warning but builds successfully; do not mix Compose API cleanup into feature phases unless explicitly requested.
 - `CameraPreview` uses CameraX `PreviewView` in Compose `AndroidView`; default lens is front camera, with lightweight in-prompter front/back flip.
+- `CameraPreview` distinguishes camera `Denied` from `PermanentlyDenied`, supports explicit retry through `permissionRequestKey`, and refreshes authorization after returning from app settings.
 - If a requested camera is unavailable, keep a recovery path to the last available lens; do not leave `PrompterScreen` stuck in `Unavailable`.
-- `PrompterScreen` uses `FLAG_KEEP_SCREEN_ON` while active.
+- `PrompterScreen` uses `FLAG_KEEP_SCREEN_ON` while active and hides system bars only while the prompter screen is active; restore system bars on exit.
+- Microphone permission should be requested only after the user taps the microphone button; permanently denied microphone permission opens app details settings from that button.
 - `ScrollEngine` uses Compose `withFrameNanos`; keep iOS math: speed clamp 20..260, visual tuning factor 1.85, follow smoothing `delta * 12`, snap below 0.5px.
 - Prompter text offset should stay draw-phase via `graphicsLayer` or lambda offset; avoid per-frame full recomposition.
 - Prompter drag gestures must use cumulative translation from drag start, not per-event `dragAmount`, for speed/manual-scroll/progress formulas.

@@ -1,24 +1,33 @@
 package com.qiaomu.prompter.ui.editor
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -30,10 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,8 +51,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.qiaomu.prompter.data.Script
@@ -55,6 +64,7 @@ import com.qiaomu.prompter.data.TextColorPreset
 import com.qiaomu.prompter.ui.component.GlassActionPanel
 import com.qiaomu.prompter.ui.component.GlassActionRow
 import com.qiaomu.prompter.ui.component.GlassPanelHeader
+import com.qiaomu.prompter.ui.component.glassSurface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -82,6 +92,7 @@ fun ScriptEditorScreen(
     var showTitleDialog by remember { mutableStateOf(false) }
     var titleDraft by remember { mutableStateOf("") }
     var showClearPanel by remember { mutableStateOf(false) }
+    val canStartPrompting = script?.content?.trim()?.isNotEmpty() == true
 
     LaunchedEffect(scriptId, scripts) {
         if (script == null) {
@@ -146,22 +157,49 @@ fun ScriptEditorScreen(
                     Text(script?.title?.ifBlank { Script.UNTITLED } ?: "文稿")
                 },
                 navigationIcon = {
-                    IconButton(onClick = { saveAndThen(onBack) }) {
+                    IconButton(
+                        onClick = { saveAndThen(onBack) },
+                        modifier = Modifier
+                            .size(42.dp)
+                            .glassSurface(CircleShape)
+                    ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        titleDraft = script?.title?.ifBlank { Script.UNTITLED }.orEmpty()
-                        showTitleDialog = true
-                    }) {
-                        Icon(Icons.Default.Edit, contentDescription = "编辑标题")
-                    }
-                    IconButton(onClick = { saveAndThen(onStartPrompter) }) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "开始提词")
-                    }
-                    IconButton(onClick = { saveWithFeedback() }) {
-                        Icon(Icons.Default.Save, contentDescription = "保存")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                titleDraft = script?.title?.ifBlank { Script.UNTITLED }.orEmpty()
+                                showTitleDialog = true
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .glassSurface(CircleShape)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "编辑标题")
+                        }
+                        IconButton(
+                            onClick = { saveAndThen(onStartPrompter) },
+                            enabled = canStartPrompting,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .glassSurface(CircleShape)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = "开始提词")
+                        }
+                        IconButton(
+                            onClick = { saveWithFeedback() },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .glassSurface(CircleShape)
+                        ) {
+                            Icon(Icons.Default.Save, contentDescription = "保存")
+                        }
                     }
                 }
             )
@@ -179,18 +217,14 @@ fun ScriptEditorScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 16.dp)
+                        .imePadding(),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    TabRow(selectedTabIndex = selectedTab.ordinal) {
-                        EditorTab.entries.forEach { tab ->
-                            Tab(
-                                selected = selectedTab == tab,
-                                onClick = { selectedTab = tab },
-                                text = { Text(tab.title) }
-                            )
-                        }
-                    }
+                    GlassSegmentedTabs(
+                        selectedTab = selectedTab,
+                        onTabSelected = { selectedTab = it }
+                    )
 
                     when (selectedTab) {
                         EditorTab.Script -> ScriptBodyEditor(
@@ -219,13 +253,11 @@ fun ScriptEditorScreen(
                         )
                     }
 
-                    Button(
-                        onClick = { saveWithFeedback() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Save, contentDescription = null)
-                        Text("保存", modifier = Modifier.padding(start = 8.dp))
-                    }
+                    EditorPrimaryActions(
+                        canStartPrompting = canStartPrompting,
+                        onSave = { saveWithFeedback() },
+                        onStartPrompter = { saveAndThen(onStartPrompter) }
+                    )
                 }
 
                 GlassActionPanel(
@@ -256,32 +288,164 @@ fun ScriptEditorScreen(
     }
 
     if (showTitleDialog) {
-        AlertDialog(
-            onDismissRequest = { showTitleDialog = false },
-            title = { Text("编辑标题") },
-            text = {
-                OutlinedTextField(
-                    value = titleDraft,
-                    onValueChange = { titleDraft = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+        TitleEditDialog(
+            titleDraft = titleDraft,
+            onTitleDraftChange = { titleDraft = it },
+            onDismiss = { showTitleDialog = false },
+            onConfirm = {
+                script = script?.copy(title = titleDraft.trim().ifEmpty { Script.UNTITLED })
+                showTitleDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun TitleEditDialog(
+    titleDraft: String,
+    onTitleDraftChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.38f))
+            .clickable(onClick = onDismiss)
+            .padding(horizontal = 26.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .dialogGlassSurface(RoundedCornerShape(24.dp))
+                .clickable(enabled = false) {}
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "编辑标题",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
                 )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        script = script?.copy(title = titleDraft.trim().ifEmpty { Script.UNTITLED })
-                        showTitleDialog = false
-                    }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .glassSurface(CircleShape)
                 ) {
-                    Text("完成")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTitleDialog = false }) {
-                    Text("取消")
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "关闭",
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
+            GlassSingleLineField(
+                value = titleDraft,
+                onValueChange = onTitleDraftChange,
+                placeholder = "文稿名",
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                GlassDialogButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                )
+                GlassDialogButton(
+                    text = "完成",
+                    onClick = onConfirm,
+                    primary = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+private fun Modifier.dialogGlassSurface(shape: RoundedCornerShape): Modifier =
+    this
+        .clip(shape)
+        .background(Color(0xFFF8F3FA).copy(alpha = 0.94f))
+        .border(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.86f),
+                    Color.White.copy(alpha = 0.26f),
+                    Color.Black.copy(alpha = 0.12f)
+                )
+            ),
+            shape = shape
+        )
+
+@Composable
+private fun GlassSingleLineField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(16.dp)
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge.merge(
+            TextStyle(color = MaterialTheme.colorScheme.onSurface)
+        ),
+        modifier = modifier
+            .height(52.dp)
+            .clip(shape)
+            .glassSurface(shape),
+        decorationBox = { innerTextField ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = placeholder,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                innerTextField()
+            }
+        }
+    )
+}
+
+@Composable
+private fun GlassDialogButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false
+) {
+    Box(
+        modifier = modifier
+            .height(46.dp)
+            .glassSurface(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
@@ -318,14 +482,162 @@ private fun ScriptBodyEditor(
                 Text("清空正文", modifier = Modifier.padding(start = 8.dp))
             }
         }
-        OutlinedTextField(
+        GlassBodyField(
             value = script.content,
             onValueChange = { onScriptChange(script.copy(content = it)) },
-            placeholder = { Text("在这里输入提词正文") },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         )
+    }
+}
+
+@Composable
+private fun GlassSegmentedTabs(
+    selectedTab: EditorTab,
+    onTabSelected: (EditorTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .glassSurface(shape)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        EditorTab.entries.forEach { tab ->
+            val selected = selectedTab == tab
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(14.dp))
+                    .then(
+                        if (selected) {
+                            Modifier.glassSurface(RoundedCornerShape(14.dp))
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .clickable { onTabSelected(tab) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = tab.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassBodyField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(20.dp)
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        textStyle = MaterialTheme.typography.bodyLarge.merge(
+            TextStyle(
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
+            )
+        ),
+        modifier = modifier
+            .clip(shape)
+            .glassSurface(shape),
+        decorationBox = { innerTextField ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(PaddingValues(horizontal = 16.dp, vertical = 14.dp))
+            ) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = "在这里输入提词正文",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                innerTextField()
+            }
+        }
+    )
+}
+
+@Composable
+private fun EditorPrimaryActions(
+    canStartPrompting: Boolean,
+    onSave: () -> Unit,
+    onStartPrompter: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .height(52.dp)
+                .weight(0.42f)
+                .glassSurface(RoundedCornerShape(18.dp))
+                .clickable(onClick = onSave),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text("保存", fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Box(
+            modifier = Modifier
+                .height(52.dp)
+                .weight(0.58f)
+                .glassSurface(RoundedCornerShape(18.dp))
+                .clickable(enabled = canStartPrompting, onClick = onStartPrompter),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = if (canStartPrompting) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.44f)
+                    },
+                    modifier = Modifier.size(22.dp)
+                )
+                Text(
+                    text = "开始提词",
+                    color = if (canStartPrompting) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.44f)
+                    },
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
 
