@@ -18,6 +18,7 @@ import com.qiaomu.prompter.data.ScriptRepository
 import com.qiaomu.prompter.poc.SpeechRecognizerPocActivity
 import com.qiaomu.prompter.settings.AiProviderConfigStore
 import com.qiaomu.prompter.ui.editor.ScriptEditorScreen
+import com.qiaomu.prompter.ui.prompter.PrompterScreen
 import com.qiaomu.prompter.ui.scriptlist.ScriptListScreen
 import com.qiaomu.prompter.ui.settings.AppSettingsScreen
 
@@ -75,6 +76,22 @@ private fun QMPrompterRoot(
                         ScriptEditorScreen(
                             scriptId = scriptId,
                             scriptRepository = scriptRepository,
+                            onBack = { navController.popBackStack() },
+                            onStartPrompter = {
+                                navController.navigate("prompter/$scriptId")
+                            }
+                        )
+                    }
+                }
+                composable(
+                    route = ROUTE_PROMPTER,
+                    arguments = listOf(navArgument(ARG_SCRIPT_ID) {})
+                ) { backStackEntry ->
+                    val scriptId = backStackEntry.arguments?.getString(ARG_SCRIPT_ID)
+                    if (scriptId != null) {
+                        PrompterScreen(
+                            scriptId = scriptId,
+                            scriptRepository = scriptRepository,
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -94,3 +111,4 @@ private const val ROUTE_SCRIPTS = "scripts"
 private const val ROUTE_SETTINGS = "settings"
 private const val ARG_SCRIPT_ID = "scriptId"
 private const val ROUTE_EDITOR = "editor/{$ARG_SCRIPT_ID}"
+private const val ROUTE_PROMPTER = "prompter/{$ARG_SCRIPT_ID}"

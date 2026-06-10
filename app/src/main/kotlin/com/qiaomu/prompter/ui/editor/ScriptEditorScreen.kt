@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -27,6 +28,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -52,6 +55,7 @@ import com.qiaomu.prompter.data.TextColorPreset
 import com.qiaomu.prompter.ui.component.GlassActionPanel
 import com.qiaomu.prompter.ui.component.GlassActionRow
 import com.qiaomu.prompter.ui.component.GlassPanelHeader
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class EditorTab(val title: String) {
@@ -65,11 +69,13 @@ fun ScriptEditorScreen(
     scriptId: String,
     scriptRepository: ScriptRepository,
     onBack: () -> Unit,
+    onStartPrompter: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scripts by scriptRepository.scripts.collectAsState()
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var script by remember(scriptId) { mutableStateOf<Script?>(null) }
     var selectedTab by remember { mutableStateOf(EditorTab.Script) }
@@ -106,12 +112,34 @@ fun ScriptEditorScreen(
         }
     }
 
+    fun saveWithFeedback() {
+        val current = script ?: return
+        val toSave = normalized(current)
+        script = toSave
+        scope.launch {
+            scriptRepository.save(toSave)
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val snackbarJob = launch {
+                snackbarHostState.showSnackbar("已保存")
+            }
+            delay(500)
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarJob.cancel()
+        }
+    }
+
     BackHandler {
         saveAndThen(onBack)
     }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.padding(bottom = 72.dp)
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -129,7 +157,10 @@ fun ScriptEditorScreen(
                     }) {
                         Icon(Icons.Default.Edit, contentDescription = "编辑标题")
                     }
-                    IconButton(onClick = { saveAndThen() }) {
+                    IconButton(onClick = { saveAndThen(onStartPrompter) }) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = "开始提词")
+                    }
+                    IconButton(onClick = { saveWithFeedback() }) {
                         Icon(Icons.Default.Save, contentDescription = "保存")
                     }
                 }
@@ -189,7 +220,7 @@ fun ScriptEditorScreen(
                     }
 
                     Button(
-                        onClick = { saveAndThen() },
+                        onClick = { saveWithFeedback() },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Save, contentDescription = null)

@@ -40,6 +40,7 @@ Do NOT introduce unless explicitly requested:
 - Phase 1.5 SpeechRecognizer PoC 计划：`plans/phase-1.5-speech-poc-plan.md`
 - Phase 1.5 SpeechRecognizer PoC 结果：`plans/phase-1.5-speech-poc-result.md`
 - Phase 2 实施计划：`plans/phase-2-implementation-plan.md`
+- Phase 3 实施计划：`plans/phase-3-implementation-plan.md`
 - Kotlin 模板初始化指南：`INIT_FROM_TEMPLATE.md`
 - 当前交接记录：`tmp/handoff.md`
 - iOS 参考实现：`QMPrompter/`
@@ -93,7 +94,7 @@ Do NOT introduce unless explicitly requested:
 - Keep `android.useAndroidX=true` in `gradle.properties`; it is required by `INIT_FROM_TEMPLATE.md`.
 - Manifest must keep camera, microphone, internet permissions, SpeechRecognizer queries, portrait orientation, and backup exclusions for `ai_provider_config.xml`.
 - Keep `MODIFY_AUDIO_SETTINGS` while the SpeechRecognizer PoC or final beep-handling implementation needs audio muting.
-- Current command-line verification is `rtk ./gradlew.bat test --stacktrace` followed by `rtk ./gradlew.bat assembleDebug --stacktrace`; this passed after Phase 2 implementation and subagent-review fixes.
+- Current command-line verification is `rtk ./gradlew.bat test --stacktrace` followed by `rtk ./gradlew.bat assembleDebug --stacktrace`; this passed after Phase 3 implementation and subagent-review fixes.
 - Room uses `exportSchema = true`; keep generated schema files under `app/schemas/` as migration baselines.
 - `Script.createdAt` and `Script.updatedAt` are epoch millis `Long` values, not ISO 8601 strings.
 - `TextColorPreset` stores raw values only (`white`, `silver`, `graphite`); do not add iOS JSON legacy aliases such as `yellow` or `green` unless an explicit data import requirement is added.
@@ -107,9 +108,18 @@ Do NOT introduce unless explicitly requested:
 - Observed restart gap with destroy/recreate was about 152ms and acceptable.
 - No audible system beep was heard on the tested device.
 - `ERROR_NO_MATCH` and `ERROR_NETWORK_TIMEOUT` still occur; final `SpeechFollower` must treat them as recoverable and avoid infinite retry.
-- Phase 2 list/editor/settings UI is complete; next phase is Phase 3 camera preview, scroll engine, prompter screen skeleton, and gestures.
+- Phase 3 camera preview, scroll engine, prompter screen skeleton, gestures, keep-screen-on, and lightweight camera flip are implemented; next required work is real-device Phase 3 validation, then Phase 4 speech/AI.
 - Keep the temporary speech test entry until final `SpeechFollower` makes it obsolete, but do not expose `Speech PoC`/phase wording in production-facing UI.
 - In `ScriptEditorScreen`, empty titles save as `Script.UNTITLED`; font size clamps to 12..110, scroll speed clamps to 20..220, and overlay opacity clamps to 0.18..0.82.
+- `ScriptEditorScreen` explicit save icon/button shows `已保存` snackbar for about 0.5s, offset above the bottom save button; auto-save on back/start-prompter remains silent.
 - Camera transparency UI is the inverse of `Script.overlayOpacity`: display/edit `transparency = 1 - overlayOpacity`, then persist `overlayOpacity = 1 - transparency` with the same 0.18..0.82 clamp.
 - `AppSettingsScreen` uses the existing `AiProviderConfigStore`; Base URL and Model remain optional, with DeepSeek defaults shown as placeholders rather than explanatory in-app text.
 - `rememberSwipeToDismissBoxState(confirmValueChange = ...)` currently emits a Material3 deprecation warning but builds successfully; do not mix Compose API cleanup into feature phases unless explicitly requested.
+- `CameraPreview` uses CameraX `PreviewView` in Compose `AndroidView`; default lens is front camera, with lightweight in-prompter front/back flip.
+- If a requested camera is unavailable, keep a recovery path to the last available lens; do not leave `PrompterScreen` stuck in `Unavailable`.
+- `PrompterScreen` uses `FLAG_KEEP_SCREEN_ON` while active.
+- `ScrollEngine` uses Compose `withFrameNanos`; keep iOS math: speed clamp 20..260, visual tuning factor 1.85, follow smoothing `delta * 12`, snap below 0.5px.
+- Prompter text offset should stay draw-phase via `graphicsLayer` or lambda offset; avoid per-frame full recomposition.
+- Prompter drag gestures must use cumulative translation from drag start, not per-event `dragAmount`, for speed/manual-scroll/progress formulas.
+- Top controls need a gesture reserve area so prompter drag zones do not hijack control interactions.
+- Phase 3 still requires real-device validation for camera permission, front/back flip, lock/background recovery, keep-screen-on, and 5k/20k script scroll smoothness.

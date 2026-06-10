@@ -1,320 +1,237 @@
-# Handoff - Phase 2 Complete
+# Handoff - Phase 3 Implemented
 
 ## Project Goal
 
 QMPrompter Android is a Kotlin/Jetpack Compose migration of the existing iOS SwiftUI teleprompter app. Android project files live at the repository root, with the app module under `app/`. The iOS implementation remains in `QMPrompter/` for behavior reference.
 
-Primary reference documents:
-
-- `MIGRATION_PLAN.md`
-- `plans/phase-1-implementation-plan.md`
-- `plans/phase-1.5-speech-poc-plan.md`
-- `plans/phase-1.5-speech-poc-result.md`
-- `plans/phase-2-implementation-plan.md`
+Feature target: parity with the current iOS app using Jetpack Compose, Room, CameraX, Android SpeechRecognizer, and OkHttp for OpenAI-compatible AI generation.
 
 ## Current Status
 
-- Phase 1 is complete: project shell, Room data layer, AI provider config storage, prompt formatter, Compose/NavHost app entry.
-- Phase 1.5 is complete: disposable `SpeechRecognizer` continuous-listening PoC implemented and tested on a real device.
-- Phase 2 is complete: list, editor, reusable glass action panel, and AI provider settings UI.
-- Recommended next phase: Phase 3, camera preview + scroll engine + prompter screen skeleton/gestures from `MIGRATION_PLAN.md`.
+- Phase 1 complete: project shell, Room data layer, AI provider config storage, prompt formatter, Compose/NavHost app entry.
+- Phase 1.5 complete: disposable `SpeechRecognizer` continuous-listening PoC implemented and tested on a real device.
+- Phase 2 complete: list, editor, reusable glass action panel, and AI provider settings UI.
+- Phase 3 implemented: CameraX preview, prompter screen skeleton, scroll engine, gestures, keep-screen-on, and a lightweight front/back camera flip control.
+- Phase 3 command verification passes.
+- Phase 3 still needs manual device validation, especially camera permission paths, camera flip behavior, background/lock recovery, and long-script scroll smoothness.
+- Editor explicit save actions now show a short "已保存" snackbar. It is offset above the bottom save button and dismisses after about 0.5 seconds. Auto-save on back/start-prompter remains silent.
 
 Current git state at this handoff:
 
 - Branch: `main`
-- Branch relation: `main...origin/main [ahead 3]`
-- Worktree has uncommitted Phase 2 changes:
+- Branch relation: `main...origin/main [ahead 4]`
+- Worktree has uncommitted Phase 3 changes:
   - Modified:
     - `app/src/main/kotlin/com/qiaomu/prompter/MainActivity.kt`
-    - `tmp/handoff.md`
-  - Added:
-    - `app/src/main/kotlin/com/qiaomu/prompter/ui/component/GlassActionPanel.kt`
-    - `app/src/main/kotlin/com/qiaomu/prompter/ui/scriptlist/ScriptCard.kt`
-    - `app/src/main/kotlin/com/qiaomu/prompter/ui/scriptlist/ScriptListScreen.kt`
     - `app/src/main/kotlin/com/qiaomu/prompter/ui/editor/ScriptEditorScreen.kt`
-    - `app/src/main/kotlin/com/qiaomu/prompter/ui/settings/AppSettingsScreen.kt`
-    - `plans/phase-2-implementation-plan.md`
+  - Untracked:
+    - `app/src/main/kotlin/com/qiaomu/prompter/ui/camera/`
+    - `app/src/main/kotlin/com/qiaomu/prompter/ui/prompter/`
+    - `plans/phase-3-implementation-plan.md`
+    - `tmp/handoff.md`
 
 ## Tooling
 
-- Kotlin 2.2.10
-- Android Gradle Plugin 9.2.0
-- Gradle Wrapper 9.4.1
-- JDK 21
-- Jetpack Compose Material3
-- Navigation Compose
-- Room 2.8.4 + KSP
-- CameraX
-- Android SpeechRecognizer
-- OkHttp + Coroutines
-- JUnit 4
+Always read `C:\Users\Max\.codex\RTK.md` before using commands at the beginning of a session.
 
-Important Gradle flags to keep for now:
+Use `rtk` for ordinary, non-interactive plain-text commands. Use `rtk rg` for code/text search. Do not use PowerShell `Get-Content` or `Select-String` for searching. Do not use `rtk` for structured parsing, process management, env/path operations, shell syntax, interactive commands, destructive commands, or privileged operations.
 
-- `android.builtInKotlin=false`
-- `android.newDsl=false`
-- `android.useAndroidX=true`
+Common commands:
 
-Removing the first two previously caused AGP/Kotlin plugin failures. Build output still contains AGP deprecation warnings; treat that as separate tooling cleanup, not feature-phase work.
+- Build debug APK: `rtk ./gradlew.bat assembleDebug --stacktrace`
+- Test: `rtk ./gradlew.bat test --stacktrace`
+- Install debug APK: `rtk ./gradlew.bat installDebug --stacktrace`
+- Check working tree: `rtk git status --short --branch`
+- Search code/text: `rtk rg "<pattern>"`
 
-## Phase 1 Summary
+Run Gradle verification sequentially. Do not run `test` and `assembleDebug` in parallel; Kotlin incremental compilation can race on `app/build/tmp/kotlin-classes`.
 
-Implemented data and app foundation:
+## Phase 3 Plan
 
-- `app/src/main/kotlin/com/qiaomu/prompter/data/Script.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/data/TextColorPreset.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/data/Converters.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/data/ScriptDao.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/data/AppDatabase.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/data/ScriptRepository.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/settings/AiProviderConfigStore.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/util/PromptFormatter.kt`
-- `app/src/test/kotlin/com/qiaomu/prompter/util/PromptFormatterTest.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/QMPrompterApp.kt`
+The approved Phase 3 plan is saved at:
 
-Key Phase 1 decisions:
+- `plans/phase-3-implementation-plan.md`
 
-- Android data is new; do not import iOS `scripts.json`.
-- `Script.createdAt` and `Script.updatedAt` are epoch millis `Long`.
-- `TextColorPreset` stores raw values only: `white`, `silver`, `graphite`.
-- Do not add iOS legacy aliases such as `yellow` or `green` unless an explicit import requirement is added.
-- Room uses `version = 1` and `exportSchema = true`.
-- Generated schema files under `app/schemas/` are migration baselines.
-- First-run sample script is seeded synchronously from `RoomDatabase.Callback.onCreate()` with `SupportSQLiteDatabase.execSQL`.
-- `AiProviderConfigStore` uses SharedPreferences name `ai_provider_config`; backup exclusions must continue to exclude `ai_provider_config.xml`.
-- `PromptFormatter` is ported from `QMPrompter/Utilities/PromptFormatter.swift`.
-- Prompt formatter code-point counting is acceptable for current Chinese/ASCII punctuation parity. Emoji grapheme cluster parity is not a Phase 1 requirement.
+Phase 3 scope:
 
-## Phase 1.5 Summary
+1. Camera preview with CameraX.
+2. Scroll engine with frame-based delta-time math.
+3. Prompter screen skeleton with camera background, dark overlay, scrolling text, and keep-screen-on behavior.
+4. Gesture controls: left-side speed drag, center manual scroll, right-side progress drag, and tap to play/pause.
+5. Lightweight camera flip: default to front camera, with an in-prompter control to switch between front and back cameras.
 
-Implemented disposable PoC:
+Explicitly out of Phase 3:
 
-- `app/src/main/kotlin/com/qiaomu/prompter/poc/SpeechRecognizerPocActivity.kt`
-- Registered in `app/src/main/AndroidManifest.xml`.
-- Temporary speech test entry is still reachable from the list screen.
-- Added `MODIFY_AUDIO_SETTINGS` permission for the beep-muting experiment.
+- Final speech following.
+- Current-line speech highlighting.
+- Dictation.
+- AI generation.
+- Persisted camera selection or a camera settings system.
 
-Real-device Phase 1.5 results:
+## Phase 3 Implementation Summary
 
-- `ERROR_RECOGNIZER_BUSY` was not reproduced.
-- `Destroy/recreate` was more stable than `Delay 150ms`.
-- `ERROR_NO_MATCH` occurs.
-- `ERROR_NETWORK_TIMEOUT` occurs.
-- No audible system beep was heard on the tested device.
-- With `Destroy/recreate`, observed restart gap was about 152 ms and acceptable.
+New files:
 
-Phase 4 recommendation based on PoC:
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/camera/CameraPreview.kt`
+  - Compose `AndroidView` wrapper around CameraX `PreviewView`.
+  - Requests camera permission with `rememberLauncherForActivityResult`.
+  - Binds CameraX `Preview` to the current lifecycle.
+  - Accepts `lensFacing` so the prompter can flip front/back cameras.
+  - Reports `Checking`, `Authorized`, `Denied`, and `Unavailable` states.
 
-- Implement final `SpeechFollower` with destroy/recreate as the first restart strategy.
-- Keep delayed restart as a fallback only if another tested device shows worse behavior with destroy/recreate.
-- Treat `ERROR_NO_MATCH` and `ERROR_SPEECH_TIMEOUT` as normal recoverable events and restart.
-- Treat `ERROR_NETWORK_TIMEOUT` as recoverable, but show a readable state such as `语音网络不稳定` if it repeats.
-- Keep busy counting and a failure threshold even though busy was not reproduced.
-- Never retry forever; repeated busy/network failures should enter a failed state until the user manually restarts voice following.
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/prompter/ScrollEngine.kt`
+  - Lightweight state holder, no ViewModel.
+  - Uses Compose `withFrameNanos`.
+  - Ports iOS delta-time math:
+    - speed clamp `20..260`
+    - line height minimum `40`
+    - average characters minimum `6`
+    - visual tuning factor `1.85`
+    - follow smoothing `next = offset + (target - offset) * min(1, delta * 12)`
+    - snap to target below `0.5px`
+    - pause automatically at maximum offset
 
-## Phase 2 Summary
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/prompter/PrompterScreen.kt`
+  - Loads the selected `Script` from `ScriptRepository.scripts`.
+  - Renders full-screen camera preview, overlay, prompt text, controls, and gesture zones.
+  - Uses existing `PromptFormatter`.
+  - Uses `TextMeasurer` for line measurement.
+  - Renders only a visible line window around the viewport.
+  - Applies per-line scroll offset with `graphicsLayer`.
+  - Sets `FLAG_KEEP_SCREEN_ON` while active.
+  - Provides back, play/pause, and camera flip controls.
+  - Default camera is front-facing.
+  - Gesture zones:
+    - left: speed drag with cumulative translation `-translationY * 0.42`
+    - center: manual scroll with cumulative translation `-translationY * 1.05`
+    - right: progress drag with cumulative translation `-translationY * 1.35`
+  - Top `120.dp` is reserved so gestures do not cover the control area.
+  - Speed changes are saved to Room on drag end.
+  - Scroll offset is not persisted.
 
-Implemented UI files:
-
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/component/GlassActionPanel.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/scriptlist/ScriptCard.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/scriptlist/ScriptListScreen.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/editor/ScriptEditorScreen.kt`
-- `app/src/main/kotlin/com/qiaomu/prompter/ui/settings/AppSettingsScreen.kt`
-- `plans/phase-2-implementation-plan.md`
-
-Modified app wiring:
+Modified files:
 
 - `app/src/main/kotlin/com/qiaomu/prompter/MainActivity.kt`
-  - Replaced the temporary shell screen with `NavHost` routes:
-    - `scripts`
-    - `editor/{scriptId}`
-    - `settings`
-  - Passes `ScriptRepository` and `AiProviderConfigStore` from `QMPrompterApp`.
-  - Keeps the temporary speech test entry by launching `SpeechRecognizerPocActivity`.
+  - Added `prompter/{scriptId}` route.
+  - Routes `PrompterScreen` with existing `ScriptRepository`.
 
-Implemented behavior:
+- `app/src/main/kotlin/com/qiaomu/prompter/ui/editor/ScriptEditorScreen.kt`
+  - Added `onStartPrompter` callback.
+  - Added top bar play icon for "开始提词".
+  - Click saves the current script before navigating to the prompter.
+  - Explicit save icon/button shows "已保存" feedback for about 0.5 seconds.
 
-- Script list:
-  - Observes `ScriptRepository.scripts`.
-  - Searches title and content.
-  - Creates a blank draft with `Script.createDraft()` then saves and opens it.
-  - Opens existing scripts in the editor.
-  - Supports swipe-to-delete.
-  - Opens AI settings.
-  - Keeps temporary speech test entry.
+## Subagent Review Fixes
 
-- Script card:
-  - Shows title, preview, updated date, content length, font size, and scroll speed.
-  - Uses shared glass-style surface.
+A subagent reviewed the Phase 3 implementation against `plans/phase-3-implementation-plan.md` and `MIGRATION_PLAN.md`.
 
-- Editor:
-  - Loads script by id from repository state.
-  - Tabs: `文稿` and `显示`.
-  - Supports title editing dialog.
-  - Supports body editing, paste, and clear-body confirmation panel.
-  - Saves on explicit save and back navigation.
-  - Normalizes empty title to `Script.UNTITLED`.
-  - Clamps font size to `12..110`, scroll speed to `20..220`, and overlay opacity to `0.18..0.82`.
-  - Text color choices use `TextColorPreset.editorChoices`.
-  - Camera transparency UI maps to `overlayOpacity` with reverse mapping: `1 - transparency`, clamped to `0.18..0.82`.
+Findings fixed:
 
-- Settings:
-  - Reads/writes existing `AiProviderConfigStore`.
-  - Inputs: API Key, Base URL, Model.
-  - Base URL placeholder: `https://api.deepseek.com`.
-  - Model placeholder: `deepseek-v4-flash`.
-  - Explicit save button writes all fields at once.
+- Drag gestures originally used per-event delta as if it were total translation. Fixed by accumulating drag translation from drag start before applying speed/manual-scroll/progress formulas.
+- Requested unavailable camera could leave UI stuck in `Unavailable`. Fixed by tracking the last available lens and allowing camera flip while unavailable.
+- Full-screen gesture layer originally covered the top controls. Fixed by adding a top gesture reserve.
 
-Phase 2 scope guard:
+Finding noted but not a runtime bug:
 
-- No CameraX preview was implemented.
-- No `ScrollEngine` was implemented.
-- No `PrompterScreen` was implemented.
-- No final `SpeechFollower` integration was implemented.
-- No AI generation/network implementation was added.
-- No ViewModel, DI framework, XML UI, schema change, DataStore, or broad test infrastructure was added.
+- New files are untracked. If committing, add the new camera/prompter directories and the Phase 3 plan file.
 
-Subagent review after implementation:
-
-- A subagent checked Phase 2 implementation against the plan.
-- It found no Phase 3/4 mixing and no architecture/schema violations.
-- It flagged two visible internal/explanatory UI strings:
-  - `Speech PoC` content description in the list entry.
-  - Settings helper text explaining default behavior.
-- Both were fixed:
-  - Speech entry content description is now `语音测试`.
-  - Settings screen now only shows `已保存` after saving; default values remain as placeholders.
-
-## Known Warnings
-
-Gradle/AGP warnings:
-
-- `android.builtInKotlin=false` is deprecated.
-- `android.newDsl=false` is deprecated.
-- Legacy AGP variant API warnings appear.
-- These are known compatibility warnings and should not be mixed into feature phases.
-
-Compose warnings:
-
-- `rememberSwipeToDismissBoxState(confirmValueChange = ...)` is deprecated in current Material3.
-- `Icons.Filled.ArrowBack` warns to use AutoMirrored in one settings import path.
-- These warnings do not fail build. They were left alone to avoid expanding Phase 2 beyond the requested implementation.
+No Phase 4 feature creep was found.
 
 ## Verification
 
-Last successful command-line verification after Phase 2 and subagent-review fixes:
+Latest command verification passed:
 
-```powershell
-rtk ./gradlew.bat test --stacktrace
-rtk ./gradlew.bat assembleDebug --stacktrace
-```
+- `rtk ./gradlew.bat test --stacktrace`
+- `rtk ./gradlew.bat assembleDebug --stacktrace`
 
-Both passed with `BUILD SUCCESSFUL`.
+Known warnings:
 
-Run Gradle verification sequentially. Do not run `test` and `assembleDebug` in parallel because Kotlin incremental compilation previously raced on `app/build/tmp/kotlin-classes`.
+- Existing AGP warnings about deprecated `android.builtInKotlin=false`, `android.newDsl=false`, and obsolete variant APIs.
+- Existing Compose warnings in editor code.
+- New warning: `LocalLifecycleOwner` import location is deprecated; fixing would require lifecycle-runtime-compose API cleanup and was intentionally not mixed into Phase 3.
+- New warning: `Icons.Default.ArrowBack` is deprecated in favor of AutoMirrored; also intentionally left out of Phase 3 cleanup.
 
-Manual Phase 2 checks still recommended on device/emulator:
+## Manual Phase 3 Acceptance Still Needed
 
-1. First launch shows the seeded sample script.
-2. New script can be created and opened.
-3. Title/body edits persist after returning to list.
-4. Paste appends clipboard text when body is non-empty and replaces when empty.
-5. Clear body keeps title and display settings.
-6. Font size, scroll speed, text color, and camera transparency persist.
-7. Search filters by title and body.
-8. Swipe/delete removes a script.
-9. Killing and reopening the app preserves created/edited/deleted data.
-10. Settings page saves API Key, Base URL, and Model; reopening settings reads them back.
-11. Temporary speech test entry still opens the PoC activity.
+Run on a real device or emulator:
+
+1. From editor, tap the play icon and enter the prompter.
+2. First camera permission request works.
+3. Permission denied path shows a stable fallback and does not crash.
+4. Default preview is front camera.
+5. Camera flip switches to back camera and back to front.
+6. Tap play/pause works.
+7. Reaching the end pauses automatically.
+8. Left drag changes speed and persists it.
+9. Center drag manually scrolls.
+10. Right drag changes progress.
+11. Top controls remain usable and are not hijacked by drag gestures.
+12. Screen stays awake while prompting.
+13. Lock/background then return: camera resumes and scroll offset remains.
+14. 5k and 20k character scripts scroll without obvious jank.
 
 ## Constraints To Preserve
 
-- Always read `C:\Users\Max\.codex\RTK.md` first at session start before commands.
-- Use `rtk` for ordinary external CLI commands.
-- Use `rg` for code/log/plain-text search; if `rtk` is available, use `rtk rg`.
 - Do not introduce DI frameworks such as Hilt, Dagger, or Koin.
-- Do not introduce ViewModel layer or lifecycle-viewmodel-compose.
+- Do not introduce ViewModel or lifecycle-viewmodel-compose unless explicitly requested.
 - Do not introduce XML/AppCompat/RecyclerView UI for new Android screens.
-- Do not introduce `androidx.security:security-crypto` or EncryptedSharedPreferences.
-- Do not introduce DataStore unless explicitly requested.
-- Do not implement iOS data import from `scripts.json`.
-- Do not add broad UI automation or test infrastructure.
-- Keep app portrait-only.
-- Keep Manifest permissions:
-  - `CAMERA`
-  - `RECORD_AUDIO`
-  - `INTERNET`
-  - `MODIFY_AUDIO_SETTINGS` while the PoC or final beep handling needs it
-- Keep Manifest `queries` for `android.speech.RecognitionService`.
-- Keep backup exclusions aligned with `AiProviderConfigStore` SharedPreferences file `ai_provider_config.xml`.
-- Keep `.kotlin/` ignored; it contains local Kotlin build cache/logs.
-- Keep `local.properties` machine-specific and ignored.
-- Do not expose internal phase/PoC/TODO explanatory wording in production UI. Temporary PoC activity itself still contains diagnostic UI by design until it is removed.
+- Do not introduce `androidx.security:security-crypto` or `EncryptedSharedPreferences`.
+- Do not add iOS `scripts.json` import.
+- Do not add UI automation, device matrix testing, Macrobenchmark, or broad test infrastructure unless explicitly requested.
+- Keep `local.properties` ignored and machine-specific.
+- Keep `android.builtInKotlin=false`, `android.newDsl=false`, and `android.useAndroidX=true` in `gradle.properties`.
+- Manifest must keep camera, microphone, internet permissions, SpeechRecognizer queries, portrait orientation, and backup exclusions for `ai_provider_config.xml`.
+- Keep `MODIFY_AUDIO_SETTINGS` while SpeechRecognizer beep handling may need audio muting.
+- Room uses `exportSchema = true`; keep generated schema files under `app/schemas/`.
+- `Script.createdAt` and `Script.updatedAt` are epoch millis `Long`.
+- `TextColorPreset` stores raw values only: `white`, `silver`, `graphite`.
+- First-run sample data is seeded from `RoomDatabase.Callback.onCreate()` with `SupportSQLiteDatabase.execSQL`.
+- `AiProviderConfigStore` SharedPreferences name must stay aligned with backup exclusion path `ai_provider_config.xml`.
+- `PromptFormatter` code point counting is acceptable for current parity target.
+- `.kotlin/` is local build cache/log output and should not be committed.
 
 ## iOS Reference Paths
 
 General references:
 
 - `QMPrompter/Models/Script.swift`
+- `QMPrompter/Services/ScriptStore.swift`
 - `QMPrompter/Utilities/PromptFormatter.swift`
-- `QMPrompter/Services/ScrollEngine.swift`
-- `QMPrompter/Services/SpeechFollower.swift`
-- `QMPrompter/Services/PromptDictation.swift`
-- `QMPrompter/Services/DeepSeekScriptGenerator.swift`
-- `QMPrompter/Views/PrompterView.swift`
-- `QMPrompter/Views/AIGenerationView.swift`
-
-Phase 2 references already used:
-
 - `QMPrompter/Views/ScriptListView.swift`
 - `QMPrompter/Views/ScriptEditorView.swift`
 - `QMPrompter/Views/GlassActionPanel.swift`
 - `QMPrompter/Views/AppSettingsView.swift`
-- `QMPrompter/Services/ScriptStore.swift`
-- `QMPrompter/Models/Script.swift`
 
-Phase 3 references to use next:
+Phase 3 references:
 
 - `QMPrompter/Views/PrompterView.swift`
 - `QMPrompter/Services/ScrollEngine.swift`
-- `MIGRATION_PLAN.md` Phase 3 and key technical details:
-  - Camera preview.
-  - `ScrollEngine` delta-time math.
-  - `graphicsLayer`/draw-phase offset reads to avoid per-frame full recomposition.
-  - Visible line windowing.
-  - Gesture mapping.
-  - Keep screen on.
+- `QMPrompter/Services/CameraPreview.swift`
+
+Phase 4 references for later:
+
+- `QMPrompter/Services/SpeechFollower.swift`
+- `QMPrompter/Services/PromptDictation.swift`
+- `QMPrompter/Services/DeepSeekScriptGenerator.swift`
+- `QMPrompter/Views/AIGenerationView.swift`
 
 ## Next Recommended Work
 
-Start Phase 3 from `MIGRATION_PLAN.md`:
+Immediate next step:
 
-1. Implement `CameraPreview` with CameraX + `PreviewView` in `AndroidView`.
-2. Implement `ScrollEngine` with `withFrameNanos`:
-   - speed clamp `20..260`
-   - visual tuning factor `1.85`
-   - follow smoothing formula for later Phase 4 use
-3. Implement `PrompterScreen` skeleton:
-   - camera background
-   - overlay opacity from `Script.overlayOpacity`
-   - scrolling text
-   - keep screen on while active
-   - route from editor/list when ready
-4. Implement gesture layer:
-   - left third speed
-   - middle manual scroll
-   - right third progress
-   - persist on drag end
+1. Install the debug APK on a real device.
+2. Complete the manual Phase 3 acceptance checklist above.
+3. Fix any real-device CameraX or gesture issues found during manual validation.
+4. If validation passes, commit Phase 3 changes, including untracked files.
 
-Do not integrate final speech following until Phase 4. Keep the temporary speech test entry until final `SpeechFollower` makes it obsolete.
+After Phase 3 manual validation:
 
-## Common Commands
+- Start Phase 4 from `MIGRATION_PLAN.md`:
+  - final `SpeechFollower`
+  - `SpeechScriptIndex`
+  - current-line highlighting
+  - dictation
+  - OpenAI-compatible script generation
+  - AI generation screen
 
-```powershell
-rtk git status --short --branch
-rtk rg "<pattern>"
-rtk ./gradlew.bat test --stacktrace
-rtk ./gradlew.bat assembleDebug --stacktrace
-rtk ./gradlew.bat installDebug --stacktrace
-```
+Keep the temporary speech test entry until final `SpeechFollower` makes it obsolete, but do not expose `Speech PoC` or phase wording in production-facing UI.
