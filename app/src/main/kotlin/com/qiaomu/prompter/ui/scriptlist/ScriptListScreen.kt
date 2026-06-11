@@ -1,5 +1,7 @@
 package com.qiaomu.prompter.ui.scriptlist
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,7 +22,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +57,7 @@ import com.qiaomu.prompter.ui.component.GlassActionPanel
 import com.qiaomu.prompter.ui.component.GlassActionRow
 import com.qiaomu.prompter.ui.component.GlassPanelHeader
 import com.qiaomu.prompter.ui.component.glassSurface
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,6 +73,7 @@ fun ScriptListScreen(
     val scope = rememberCoroutineScope()
     var searchText by remember { mutableStateOf("") }
     var showCreatePanel by remember { mutableStateOf(false) }
+    var pendingDeleteScript by remember { mutableStateOf<Script?>(null) }
 
     val filteredScripts = remember(scripts, searchText) {
         val query = searchText.trim()
@@ -151,20 +155,18 @@ fun ScriptListScreen(
                             val dismissState = rememberSwipeToDismissBoxState(
                                 confirmValueChange = { value ->
                                     if (value != SwipeToDismissBoxValue.Settled) {
-                                        scope.launch { scriptRepository.delete(script) }
-                                        true
-                                    } else {
-                                        false
+                                        scope.launch {
+                                            delay(120)
+                                            pendingDeleteScript = script
+                                        }
                                     }
+                                    false
                                 }
                             )
                             SwipeToDismissBox(
                                 state = dismissState,
-                                backgroundContent = {
-                                    DeleteBackground(
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                }
+                                backgroundContent = {},
+                                enableDismissFromStartToEnd = false
                             ) {
                                 ScriptCard(
                                     script = script,
@@ -205,7 +207,110 @@ fun ScriptListScreen(
                     }
                 }
             }
+
+            val deleteScript = pendingDeleteScript
+            if (deleteScript != null) {
+                DeleteConfirmDialog(
+                    scriptTitle = deleteScript.title.ifBlank { Script.UNTITLED },
+                    onDismiss = { pendingDeleteScript = null },
+                    onConfirm = {
+                        scope.launch { scriptRepository.delete(deleteScript) }
+                        pendingDeleteScript = null
+                    }
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun DeleteConfirmDialog(
+    scriptTitle: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.36f))
+            .clickable(onClick = onDismiss)
+            .padding(horizontal = 28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .confirmDialogSurface(RoundedCornerShape(24.dp))
+                .clickable(enabled = false) {}
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "删除文稿",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "删除后无法恢复。确定要删除“$scriptTitle”吗？",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ConfirmDialogButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                )
+                ConfirmDialogButton(
+                    text = "删除",
+                    onClick = onConfirm,
+                    destructive = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+private fun Modifier.confirmDialogSurface(shape: RoundedCornerShape): Modifier =
+    this
+        .clip(shape)
+        .background(Color(0xFFF8F3FA).copy(alpha = 0.96f))
+        .border(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.86f),
+                    Color.White.copy(alpha = 0.26f),
+                    Color.Black.copy(alpha = 0.12f)
+                )
+            ),
+            shape = shape
+        )
+
+@Composable
+private fun ConfirmDialogButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    destructive: Boolean = false
+) {
+    Box(
+        modifier = modifier
+            .height(46.dp)
+            .glassSurface(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -285,26 +390,5 @@ private fun EmptyScriptsState(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-@Composable
-private fun DeleteBackground(
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Spacer(modifier = Modifier.weight(1f))
-        Icon(
-            imageVector = Icons.Default.Delete,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(26.dp)
-        )
     }
 }
