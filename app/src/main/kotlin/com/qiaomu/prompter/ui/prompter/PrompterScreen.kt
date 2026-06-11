@@ -14,6 +14,7 @@ import androidx.camera.core.CameraSelector
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -44,11 +45,14 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -781,6 +785,7 @@ private fun DisplayPanelHandle(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DisplaySettingsPanel(
     visible: Boolean,
@@ -799,13 +804,13 @@ private fun DisplaySettingsPanel(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 390.dp)
+                .heightIn(max = 460.dp)
                 .consumePanelPointers()
-                .background(Color(0xFF101218).copy(alpha = 0.92f), shape)
+                .background(Color(0xFF101218).copy(alpha = 0.96f), shape)
                 .glassSurface(shape)
-                .padding(start = 18.dp, top = 24.dp, end = 18.dp, bottom = 14.dp)
+                .padding(start = 18.dp, top = 24.dp, end = 18.dp, bottom = 28.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Box(
                 modifier = Modifier.fillMaxWidth(),
@@ -834,7 +839,8 @@ private fun DisplaySettingsPanel(
                         onSettingsChange(settings.copy(fontSize = it.toDouble()))
                     },
                     valueRange = 12f..110f,
-                    steps = 97
+                    colors = displaySliderColors(),
+                    thumb = { DisplaySliderThumb() }
                 )
             }
             DisplaySliderSetting(
@@ -847,7 +853,8 @@ private fun DisplaySettingsPanel(
                         onSettingsChange(settings.copy(scrollSpeed = it.toDouble()))
                     },
                     valueRange = 20f..220f,
-                    steps = 99
+                    colors = displaySliderColors(),
+                    thumb = { DisplaySliderThumb() }
                 )
             }
             DisplayColorSetting(
@@ -868,11 +875,29 @@ private fun DisplaySettingsPanel(
                         onSettingsChange(settings.copy(overlayOpacity = nextOverlay))
                     },
                     valueRange = 0.18f..0.82f,
-                    steps = 31
+                    colors = displaySliderColors(),
+                    thumb = { DisplaySliderThumb() }
                 )
             }
         }
     }
+}
+
+@Composable
+private fun displaySliderColors() = SliderDefaults.colors(
+    thumbColor = Color.White,
+    activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.86f),
+    inactiveTrackColor = Color.White.copy(alpha = 0.24f)
+)
+
+@Composable
+private fun DisplaySliderThumb() {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .background(Color.White, CircleShape)
+            .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.78f), CircleShape)
+    )
 }
 
 @Composable
@@ -885,7 +910,7 @@ private fun DisplaySliderSetting(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
                 modifier = Modifier.weight(1f)
@@ -893,7 +918,7 @@ private fun DisplaySliderSetting(
             Text(
                 text = valueLabel,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.76f)
+                color = Color.White.copy(alpha = 0.66f)
             )
         }
         content()
@@ -918,10 +943,20 @@ private fun DisplayColorSetting(
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TextColorPreset.editorChoices.forEach { preset ->
+                val isSelected = selected == preset
                 FilterChip(
-                    selected = selected == preset,
+                    selected = isSelected,
                     onClick = { onSelected(preset) },
-                    label = { Text(preset.displayName) },
+                    label = {
+                        Text(
+                            text = preset.displayName,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.White.copy(alpha = 0.74f)
+                            }
+                        )
+                    },
                     leadingIcon = {
                         Box(
                             modifier = Modifier
@@ -929,7 +964,17 @@ private fun DisplayColorSetting(
                                 .background(preset.promptColor(), MaterialTheme.shapes.small)
                                 .padding(7.dp)
                         )
-                    }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = Color.White.copy(alpha = 0.08f),
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected,
+                        borderColor = Color.White.copy(alpha = 0.32f),
+                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+                    )
                 )
             }
         }
