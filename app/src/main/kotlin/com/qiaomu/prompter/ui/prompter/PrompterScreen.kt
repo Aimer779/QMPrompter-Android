@@ -7,9 +7,13 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -22,21 +26,29 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,6 +61,7 @@ import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +70,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -148,6 +162,13 @@ private fun PrompterContent(
     var dragTranslationY by remember { mutableDoubleStateOf(0.0) }
     var pendingSpeechInitialProgress by remember { mutableDoubleStateOf(0.0) }
     var viewportHeight by remember { mutableStateOf(0) }
+    var displaySettings by remember(script.id) {
+        mutableStateOf(DisplaySettings.fromScript(script))
+    }
+    var savedDisplaySettings by remember(script.id) {
+        mutableStateOf(DisplaySettings.fromScript(script))
+    }
+    var displayPanelExpanded by remember { mutableStateOf(false) }
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -158,6 +179,43 @@ private fun PrompterContent(
             audioPermissionState = audioDeniedState(activity)
         }
     }
+
+    fun scriptWithDisplaySettings(settings: DisplaySettings): Script =
+        script.copy(
+            fontSize = settings.fontSize,
+            scrollSpeed = settings.scrollSpeed,
+            textColorPreset = settings.textColorPreset,
+            overlayOpacity = settings.overlayOpacity
+        )
+
+    fun saveDisplaySettings(settings: DisplaySettings = displaySettings) {
+        val normalized = settings.normalized()
+        displaySettings = normalized
+        if (normalized == savedDisplaySettings) return
+        scope.launch {
+            scriptRepository.save(scriptWithDisplaySettings(normalized))
+            savedDisplaySettings = normalized
+        }
+    }
+
+    fun saveDisplaySettingsAndThen(
+        afterSave: () -> Unit,
+        settings: DisplaySettings = displaySettings
+    ) {
+        val normalized = settings.normalized()
+        displaySettings = normalized
+        scope.launch {
+            if (normalized != savedDisplaySettings) {
+                scriptRepository.save(scriptWithDisplaySettings(normalized))
+                savedDisplaySettings = normalized
+            }
+            afterSave()
+        }
+    }
+    val latestDisplaySettings by rememberUpdatedState(displaySettings)
+    val latestSaveDisplaySettings by rememberUpdatedState<(DisplaySettings) -> Unit>({
+        saveDisplaySettings(it)
+    })
 
     fun openAppSettings() {
         val intent = Intent(
@@ -177,6 +235,20 @@ private fun PrompterContent(
             pendingSpeechInitialProgress = initialProgress
             audioPermissionState = AudioPermissionState.Requesting
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    BackHandler {
+        engine.pause()
+        speechFollower.dispose()
+        saveDisplaySettingsAndThen(onBack)
+    }
+
+    LaunchedEffect(script.fontSize, script.scrollSpeed, script.textColorPreset, script.overlayOpacity) {
+        val externalSettings = DisplaySettings.fromScript(script)
+        if (displaySettings == savedDisplaySettings && externalSettings != savedDisplaySettings) {
+            displaySettings = externalSettings
+            savedDisplaySettings = externalSettings
         }
     }
 
@@ -214,6 +286,9 @@ private fun PrompterContent(
             ) {
                 audioPermissionState = AudioPermissionState.Authorized
             }
+            if (event == Lifecycle.Event.ON_STOP) {
+                latestSaveDisplaySettings(latestDisplaySettings)
+            }
         }
         lifecycleOwner?.lifecycle?.addObserver(observer)
         onDispose {
@@ -232,8 +307,8 @@ private fun PrompterContent(
         val heightPx = constraints.maxHeight
         val textMeasurer = rememberTextMeasurer()
         val horizontalPaddingPx = with(density) { 20.dp.roundToPx() }
-        val fontSizeSp = script.fontSize.toFloat().sp
-        val lineHeightSp = (script.fontSize * 1.18).toFloat().sp
+        val fontSizeSp = displaySettings.fontSize.toFloat().sp
+        val lineHeightSp = (displaySettings.fontSize * 1.18).toFloat().sp
         val targetCharacters = targetCharactersPerLine(
             widthPx = widthPx,
             fontSizePx = with(density) { fontSizeSp.toPx() }
@@ -242,7 +317,7 @@ private fun PrompterContent(
             PromptFormatter.lines(script.content, targetCharacters)
         }
         val textStyle = TextStyle(
-            color = script.textColorPreset.promptColor(),
+            color = displaySettings.textColorPreset.promptColor(),
             fontSize = fontSizeSp,
             fontWeight = FontWeight.SemiBold,
             lineHeight = lineHeightSp,
@@ -278,9 +353,9 @@ private fun PrompterContent(
             )
         }
 
-        LaunchedEffect(script.scrollSpeed, averageLineHeight, averageCharacters, maximumOffset) {
+        LaunchedEffect(displaySettings.scrollSpeed, averageLineHeight, averageCharacters, maximumOffset) {
             engine.configure(
-                speed = script.scrollSpeed,
+                speed = displaySettings.scrollSpeed,
                 lineHeight = averageLineHeight,
                 averageCharactersPerLine = averageCharacters,
                 maximumOffset = maximumOffset
@@ -321,7 +396,7 @@ private fun PrompterContent(
                 .background(
                     Color.Black.copy(
                         alpha = if (cameraState == CameraPermissionState.Authorized) {
-                            script.overlayOpacity.toFloat()
+                            displaySettings.overlayOpacity.toFloat()
                         } else {
                             0.78f
                         }
@@ -394,10 +469,10 @@ private fun PrompterContent(
                 }
             },
             onDragEnd = {
-                if (dragMode == DragMode.Speed && engine.speed != script.scrollSpeed) {
-                    scope.launch {
-                        scriptRepository.save(script.copy(scrollSpeed = engine.speed))
-                    }
+                if (dragMode == DragMode.Speed && engine.speed != displaySettings.scrollSpeed) {
+                    val nextSettings = displaySettings.copy(scrollSpeed = engine.speed)
+                    displaySettings = nextSettings
+                    saveDisplaySettings(nextSettings)
                 }
                 dragMode = null
                 dragTranslationY = 0.0
@@ -414,7 +489,7 @@ private fun PrompterContent(
             onBack = {
                 engine.pause()
                 speechFollower.dispose()
-                onBack()
+                saveDisplaySettingsAndThen(onBack)
             },
             onToggle = { engine.toggle() },
             onToggleSpeech = {
@@ -443,6 +518,26 @@ private fun PrompterContent(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
+        )
+
+        if (!displayPanelExpanded) {
+            DisplayPanelHandle(
+                onClick = { displayPanelExpanded = true },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 18.dp)
+            )
+        }
+
+        DisplaySettingsPanel(
+            visible = displayPanelExpanded,
+            settings = displaySettings,
+            onSettingsChange = { displaySettings = it.normalized() },
+            onDismiss = {
+                displayPanelExpanded = false
+                saveDisplaySettings()
+            },
+            modifier = Modifier.align(Alignment.BottomCenter)
         )
 
         if (dragMode != null) {
@@ -668,6 +763,190 @@ private fun PrompterControls(
 }
 
 @Composable
+private fun DisplayPanelHandle(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(46.dp)
+            .glassSurface(CircleShape)
+    ) {
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowUp,
+            contentDescription = "打开显示设置",
+            tint = Color.White
+        )
+    }
+}
+
+@Composable
+private fun DisplaySettingsPanel(
+    visible: Boolean,
+    settings: DisplaySettings,
+    onSettingsChange: (DisplaySettings) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(initialOffsetY = { it }),
+        exit = slideOutVertically(targetOffsetY = { it }),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 390.dp)
+                .consumePanelPointers()
+                .background(Color(0xFF101218).copy(alpha = 0.92f), shape)
+                .glassSurface(shape)
+                .padding(start = 18.dp, top = 24.dp, end = 18.dp, bottom = 14.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .glassSurface(CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "收起显示设置",
+                        tint = Color.White
+                    )
+                }
+            }
+            DisplaySliderSetting(
+                title = "字号",
+                valueLabel = settings.fontSize.roundToInt().toString()
+            ) {
+                Slider(
+                    value = settings.fontSize.toFloat(),
+                    onValueChange = {
+                        onSettingsChange(settings.copy(fontSize = it.toDouble()))
+                    },
+                    valueRange = 12f..110f,
+                    steps = 97
+                )
+            }
+            DisplaySliderSetting(
+                title = "滚动速度",
+                valueLabel = "${settings.scrollSpeed.roundToInt()} 字/分"
+            ) {
+                Slider(
+                    value = settings.scrollSpeed.toFloat(),
+                    onValueChange = {
+                        onSettingsChange(settings.copy(scrollSpeed = it.toDouble()))
+                    },
+                    valueRange = 20f..220f,
+                    steps = 99
+                )
+            }
+            DisplayColorSetting(
+                selected = settings.textColorPreset,
+                onSelected = {
+                    onSettingsChange(settings.copy(textColorPreset = it))
+                }
+            )
+            val transparency = (1.0 - settings.overlayOpacity).coerceIn(0.18, 0.82)
+            DisplaySliderSetting(
+                title = "摄像头透明度",
+                valueLabel = "${(transparency * 100).roundToInt()}%"
+            ) {
+                Slider(
+                    value = transparency.toFloat(),
+                    onValueChange = {
+                        val nextOverlay = (1.0 - it.toDouble()).coerceIn(0.18, 0.82)
+                        onSettingsChange(settings.copy(overlayOpacity = nextOverlay))
+                    },
+                    valueRange = 0.18f..0.82f,
+                    steps = 31
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisplaySliderSetting(
+    title: String,
+    valueLabel: String,
+    content: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = valueLabel,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.76f)
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+private fun DisplayColorSetting(
+    selected: TextColorPreset,
+    onSelected: (TextColorPreset) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "文字颜色",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextColorPreset.editorChoices.forEach { preset ->
+                FilterChip(
+                    selected = selected == preset,
+                    onClick = { onSelected(preset) },
+                    label = { Text(preset.displayName) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 2.dp)
+                                .background(preset.promptColor(), MaterialTheme.shapes.small)
+                                .padding(7.dp)
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun Modifier.consumePanelPointers(): Modifier =
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Final)
+                event.changes.forEach { it.consume() }
+            }
+        }
+    }
+
+@Composable
 private fun CameraStatus(
     state: CameraPermissionState,
     onRetry: () -> Unit,
@@ -823,6 +1102,35 @@ private data class PromptLineLayout(
     val y: Double,
     val height: Double
 )
+
+private data class DisplaySettings(
+    val fontSize: Double,
+    val scrollSpeed: Double,
+    val textColorPreset: TextColorPreset,
+    val overlayOpacity: Double
+) {
+    fun normalized(): DisplaySettings =
+        copy(
+            fontSize = fontSize.coerceIn(12.0, 110.0),
+            scrollSpeed = scrollSpeed.coerceIn(20.0, 220.0),
+            textColorPreset = if (textColorPreset in TextColorPreset.editorChoices) {
+                textColorPreset
+            } else {
+                TextColorPreset.White
+            },
+            overlayOpacity = overlayOpacity.coerceIn(0.18, 0.82)
+        )
+
+    companion object {
+        fun fromScript(script: Script): DisplaySettings =
+            DisplaySettings(
+                fontSize = script.fontSize,
+                scrollSpeed = script.scrollSpeed,
+                textColorPreset = script.textColorPreset,
+                overlayOpacity = script.overlayOpacity
+            ).normalized()
+    }
+}
 
 private enum class DragMode {
     Speed,
