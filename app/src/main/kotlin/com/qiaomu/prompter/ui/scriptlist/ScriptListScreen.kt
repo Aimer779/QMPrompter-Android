@@ -113,19 +113,21 @@ fun ScriptListScreen(
             )
         },
         floatingActionButton = {
-            Box(
-                modifier = Modifier
-                    .size(58.dp)
-                    .glassSurface(CircleShape)
-                    .clickable(onClick = { showCreatePanel = true }),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "新建",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(30.dp)
-                )
+            if (!showCreatePanel && pendingDeleteScript == null) {
+                Box(
+                    modifier = Modifier
+                        .size(58.dp)
+                        .glassSurface(CircleShape)
+                        .clickable(onClick = { showCreatePanel = true }),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "新建",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(30.dp)
+                    )
+                }
             }
         }
     ) { paddingValues ->
